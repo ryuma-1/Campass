@@ -12,6 +12,9 @@
 | バージョン | 日付 | 概要 | 変更者 |
 | :--- | :--- | :--- | :--- |
 | v1.0.0 | 2026/07/13 | 新規作成 | 池田 琉俊 |
+| v1.1.0 | 2026/10/06 | 星座型ビューを「学習マップ」に改称し，コンパス（F-013）を画面設計に追加 | 池田 琉俊 |
+| v1.2.0 | 2026/10/06 | 一本道ビューを廃止し，S-03 を学習マップのみの画面に変更．syllabus_nodes の order_index を廃止し importance_score を追加 | 池田 琉俊 |
+| v1.3.0 | 2026/10/06 | 4章を概要（ER図・テーブル一覧）のみとし，カラム定義は Design Doc 4.1.2 を正とする形に変更（`syllabus_edges`，`progress_statuses`，アセスメント関連テーブルを ER図に追加）．5.1 のストリーミング方式を SSE に統一 | 池田 琉俊 |
 
 ---
 
@@ -35,7 +38,7 @@ graph LR
 
 | サブシステム | 役割 |
 | :--- | :--- |
-| フロントエンド | React によるSPA．ロードマップ表示や星座型ビューなどのUIを担当． |
+| フロントエンド | React によるSPA．学習マップ（コンパス付き）などのUIを担当． |
 | バックエンド | Ruby on Rails によるAPIサーバー．LLM APIキーの秘匿管理，シラバスデータの生成・永続化を担当． |
 | データベース | MySQL．ノートブック，シラバスノード，ユーザー進捗等を永続保持． |
 | 外部LLM API | シラバスJSONの動的生成を担当．APIキーはバックエンドのみで保持し，フロントエンドには露出させない． |
@@ -57,7 +60,7 @@ graph TD
 
 | レイヤー | 役割 |
 | :--- | :--- |
-| UIコンポーネント層 | 画面表示・ユーザー操作の受付．ノートブック一覧，初期入力，ロードマップ，星座型ビュー等の各画面を構成する． |
+| UIコンポーネント層 | 画面表示・ユーザー操作の受付．ノートブック一覧，初期入力，学習マップ等の各画面を構成する． |
 | 状態管理層 | 画面をまたいで参照するアプリケーション状態（現在のノートブック，シラバスデータ等）を保持・更新する． |
 | API通信層 | バックエンド API へのリクエスト送信，およびストリーミングレスポンス（シラバス逐次生成）の受信を担当する． |
 
@@ -91,7 +94,7 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | S-01 | ノートブック一覧画面 | ユーザーが保持する複数の学習テーマ（ノートブック）を一覧表示し，新規作成・選択を行う． | F-012 |
 | S-02 | 初期入力画面 | 興味・ゴールの入力，ゴール候補の選択，難易度選択，前提知識アセスメントを行う． | F-001〜F-004 |
-| S-03 | 学習マップ画面 | LLMが生成したシラバスを表示する画面．画面内に「一本道（ロードマップ）」領域と「星座型ビュー」領域を同時に表示する．一本道領域ではメイン/サブルートの分離・折りたたみ表示に対応し，星座型ビュー領域ではシラバスノードをネットワーク図として可視化する． | F-005〜F-010，非機能要件5.2 |
+| S-03 | 学習マップ画面 | LLMが生成したシラバスを表示する画面．シラバスノードをネットワーク図（学習マップ）として可視化し，現在地と，コンパスで今進める場所を指し示す．メイン/サブルートの表示の切り分けと，地点のドリルダウン展開に対応する． | F-006，F-007，F-009，F-010，F-013，非機能要件5.2 |
 
 ### 3.2 画面項目定義
 
@@ -101,7 +104,7 @@ graph TD
 graph TD
     S01[S-01 ノートブック一覧画面]
     S02[S-02 初期入力画面]
-    S03["S-03 学習マップ画面<br/>（一本道領域 + 星座型ビュー領域を同時表示）"]
+    S03["S-03 学習マップ画面<br/>（学習マップ + コンパス）"]
 
     S01 -->|新規ノートブック作成| S02
     S01 -->|既存ノートブックを選択| S03
@@ -115,109 +118,78 @@ graph TD
 
 ## 4. データベース設計
 
+本章ではテーブル間の関係の概要のみを示す．カラム・型・制約の定義は Design Doc（`design_doc.md`）4.1.2 を正とし，本書では重複して定義しない．
+
 ### 4.1 ER図
+
+主キー・外部キーのみを示す．
 
 ```mermaid
 erDiagram
     users ||--o{ notebooks : "作成する"
+    users ||--o{ cross_notebook_links : "所有する"
     notebooks ||--o{ syllabus_nodes : "含む"
+    notebooks ||--o{ assessment_questions : "含む"
     syllabus_nodes ||--o{ syllabus_nodes : "親子(ドリルダウン)"
+    syllabus_nodes ||--o{ syllabus_nodes : "サブクエストの紐付け先"
+    syllabus_nodes ||--o{ syllabus_edges : "前提(from)"
+    syllabus_nodes ||--o{ syllabus_edges : "後続(to)"
+    syllabus_nodes ||--o| progress_statuses : "進捗"
     syllabus_nodes ||--o{ cross_notebook_links : "source"
     syllabus_nodes ||--o{ cross_notebook_links : "target"
+    assessment_questions ||--o| assessment_answers : "回答"
+    syllabus_nodes |o--o{ assessment_answers : "既習判定の対象"
 
     users {
         bigint id PK
-        string name
-        string email
-        string password_digest
-        datetime created_at
-        datetime updated_at
     }
     notebooks {
         bigint id PK
         bigint user_id FK
-        string title
-        text goal
-        string difficulty "light / standard / deep"
-        string status
-        datetime created_at
-        datetime updated_at
     }
     syllabus_nodes {
         bigint id PK
         bigint notebook_id FK
-        bigint parent_id FK "自己参照(ドリルダウン階層)"
-        string title
-        text description
-        string route_type "main / sub"
-        integer depth
-        integer order_index
-        string status "not_started / in_progress / completed"
-        json embedding "nullable, メインルートノードのみ"
-        datetime created_at
-        datetime updated_at
+        bigint parent_node_id FK
+        bigint related_main_node_id FK
+    }
+    syllabus_edges {
+        bigint id PK
+        bigint from_node_id FK
+        bigint to_node_id FK
+    }
+    progress_statuses {
+        bigint id PK
+        bigint node_id FK
     }
     cross_notebook_links {
         bigint id PK
+        bigint user_id FK
         bigint source_node_id FK
         bigint target_node_id FK
-        float similarity_score
-        string status "proposed / accepted / rejected"
-        datetime created_at
-        datetime updated_at
+    }
+    assessment_questions {
+        bigint id PK
+        bigint notebook_id FK
+    }
+    assessment_answers {
+        bigint id PK
+        bigint question_id FK
+        bigint target_node_id FK
     }
 ```
 
-### 4.2 テーブル定義
+### 4.2 テーブル一覧
 
-#### users
-
-| カラム名 | 型 | 説明 |
+| テーブル | 役割 | 関連機能 |
 | :--- | :--- | :--- |
-| id | bigint | 主キー |
-| name | string | ユーザー名 |
-| email | string | メールアドレス（一意） |
-| password_digest | string | 認証用パスワードハッシュ |
-| created_at / updated_at | datetime | タイムスタンプ |
-
-#### notebooks
-
-| カラム名 | 型 | 説明 |
-| :--- | :--- | :--- |
-| id | bigint | 主キー |
-| user_id | bigint | 所有ユーザー（FK） |
-| title | string | ノートブック名 |
-| goal | text | ユーザーが設定した学習ゴール |
-| difficulty | string | 難易度（light / standard / deep） |
-| status | string | ノートブックの進行状態 |
-| created_at / updated_at | datetime | タイムスタンプ |
-
-#### syllabus_nodes
-
-| カラム名 | 型 | 説明 |
-| :--- | :--- | :--- |
-| id | bigint | 主キー |
-| notebook_id | bigint | 所属ノートブック（FK） |
-| parent_id | bigint | 親ノード（FK，自己参照，ドリルダウン展開に使用） |
-| title | string | ノードタイトル |
-| description | text | 概要・LLM生成コンテンツ |
-| route_type | string | main（メインルート）/ sub（サブクエスト） |
-| depth | integer | 階層の深さ |
-| order_index | integer | 同階層内の表示順 |
-| status | string | not_started / in_progress / completed |
-| embedding | json | 埋め込みベクトル．nullable．メインルートノードのみ付与し，クロスノートブック類似度比較に使用 |
-| created_at / updated_at | datetime | タイムスタンプ |
-
-#### cross_notebook_links
-
-| カラム名 | 型 | 説明 |
-| :--- | :--- | :--- |
-| id | bigint | 主キー |
-| source_node_id | bigint | リンク元ノード（FK: syllabus_nodes） |
-| target_node_id | bigint | リンク先ノード（FK: syllabus_nodes，異なるノートブック所属） |
-| similarity_score | float | Embedding APIによるコサイン類似度 |
-| status | string | proposed（提案中）/ accepted（承認済）/ rejected（却下） |
-| created_at / updated_at | datetime | タイムスタンプ |
+| `users` | ユーザー情報と認証 | — |
+| `notebooks` | 学習テーマごとの作業スペース．ゴール・難易度・生成状態を持つ | F-001〜F-003，F-012 |
+| `syllabus_nodes` | シラバスのノード（学習マップ上の地点） | F-006，F-007，F-011，F-013 |
+| `syllabus_edges` | ノード間の前提関係（学習マップ上の道）．同一ノートブック内のみ | F-011，F-013 |
+| `progress_statuses` | ノードごとの進捗．現在地とコンパスの決定に使う | F-010，F-013 |
+| `cross_notebook_links` | 他ノートブックのノードとの関連の提案・承認状態 | 4.2.7（Design Doc） |
+| `assessment_questions` / `assessment_answers` | 前提知識アセスメントの質問と回答 | F-004 |
 
 ---
 
@@ -227,7 +199,7 @@ erDiagram
 
 * ユーザーが確定した「ゴール」「難易度」「前提知識アセスメント結果」を基に，バックエンドが外部LLM APIへプロンプトを送信し，構造化されたシラバスJSONを生成する．
 * シラバス生成には数十秒を要する可能性があるため，**ストリーミング形式**でLLMのレスポンスを逐次受信し，生成された章・ノードから順にフロントエンドへ反映する．
-* バックエンドはストリーミングされたチャンクを解析し，WebSocket（Action Cable等）またはSSEを介してフロントエンドへ逐次配信する方式を想定する．
+* バックエンドはストリーミングされたチャンクを解析し，ノード1件分のJSONが確定するたびに SSE（Server-Sent Events）でフロントエンドへ逐次配信する（Design Doc 4.3.2）．
 
 ### 5.2 Embedding API連携
 
