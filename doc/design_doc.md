@@ -55,8 +55,8 @@
 ┌────────────────┐        ┌──────────────────────┐        ┌────────────────────┐
 │   Frontend      │  HTTP  │   Backend             │  HTTPS │  外部LLM API         │
 │   (React)       │◄──────►│   (Ruby on Rails)     │◄──────►│  (Claude / GPT等)    │
-│                 │  SSE/  │                        │  ストリーミング       │  ※オプトアウト設定必須 │
-│ ・入力フォーム    │  WS    │ ・シラバス生成オーケストレーション│        └────────────────────┘
+│                 │  SSE   │                        │  ストリーミング       │  ※オプトアウト設定必須 │
+│ ・入力フォーム    │        │ ・シラバス生成オーケストレーション│        └────────────────────┘
 │ ・学習マップUI    │        │ ・プロンプトテンプレート管理  │
 │ ・ドリルダウン表示 │        │ ・ノートブック/進捗の永続化  │
 └────────────────┘        │ ・APIキーの秘匿管理        │
@@ -71,7 +71,7 @@
                             └──────────────────────┘
 ```
 
-* フロントエンド（React）とバックエンド（Rails）は REST API + ストリーミング（Server-Sent Events もしくは WebSocket）で通信する．
+* フロントエンド（React）とバックエンド（Rails）は REST API + ストリーミング（Server-Sent Events）で通信する（4.3.1）．
 * バックエンドは外部LLM APIキーを一元管理し，フロントエンドへは絶対に露出させない（ReqDef 5.3）．
 * MySQL はグラフ構造（ノード・エッジ）を表現可能なリレーショナル設計とし，学習マップ（単一ノートブック内のネットワーク表示）およびクロスノートブックリンク（ReqDef 5.2 の拡張性言及に対応）を見据える．
 
@@ -105,7 +105,7 @@ users ──1:N── notebooks ──1:N── syllabus_nodes ──1:N── s
                     │                   │  │ self (parent)      │ (to_node_id も syllabus_nodes を参照)
                     │                   │  └────────────────────┘
                     │                   ├──1:1── progress_statuses
-                    │                   ├──1:N── assessment_targets
+                    │                   ├──1:N── assessment_answers（target_node_id 経由，NULLABLE）
                     │                   └──N:N── syllabus_nodes（他ノートブック，cross_notebook_links 経由）
                     └──1:N── assessment_questions ──1:1── assessment_answers
 ```
@@ -113,8 +113,21 @@ users ──1:N── notebooks ──1:N── syllabus_nodes ──1:N── s
 * `syllabus_edges` は `syllabus_nodes` に対して `from_node_id` / `to_node_id` の2本の外部キーを持つ自己参照的な多対多の中間テーブルであり，DAG（有向非巡回グラフ）を表現する．**同一ノートブック内のノード間のみ**を結び，学習マップはこのグラフをそのまま描画する．
 * `syllabus_nodes.parent_node_id` は同テーブルへの自己参照であり，ドリルダウン（F-007）の親子階層を表す．これは「前提関係（依存）」を表す `syllabus_edges` とは別軸の関係である点に注意する（親子＝階層の入れ子，エッジ＝学習順序の依存）．
 * `cross_notebook_links` は `syllabus_edges` とは異なり，**異なるノートブックに属するノード間**のみを結ぶテーブルであり，ユーザーの提案承認を経て初めてレコードが作成される（4.2.7）．
+* アセスメント回答が既習判定に紐づく場合は，`assessment_answers.target_node_id` で対象ノードを参照する．
 
 #### 4.1.2 テーブル定義
+
+本節のテーブル定義を正とする（基本設計書 4章は概要のみを示し，本節を参照する）．
+
+**`users`**
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `name` | VARCHAR(255) | NOT NULL | ユーザー名 |
+| `email` | VARCHAR(255) | NOT NULL, UNIQUE | メールアドレス |
+| `password_digest` | VARCHAR(255) | NOT NULL | 認証用パスワードハッシュ |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
 **`notebooks`**
 
@@ -234,7 +247,7 @@ function buildGenerationParams(difficulty):
 
 #### 4.2.3 前提知識アセスメント（F-004）
 
-決定したゴールに基づき，LLMに3〜5問の確認質問（多肢選択または自己申告形式）を生成させる．回答結果は `assessment_results` に保存し，シラバス生成プロンプトへ「ユーザーが既に習得済みの前提知識」として渡す．LLMはこれを踏まえて該当ノードを生成しない，または `skip_recommended: true` フラグ付きで生成する．
+決定したゴールに基づき，LLMに3〜5問の確認質問（多肢選択または自己申告形式）を生成させる．回答結果は `assessment_answers` に保存し，シラバス生成プロンプトへ「ユーザーが既に習得済みの前提知識」として渡す．LLMはこれを踏まえて該当ノードを生成しない，または `skip_recommended: true` フラグ付きで生成する．
 
 #### 4.2.4 シラバスJSON動的生成（F-011）
 
@@ -526,3 +539,4 @@ ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロン
 | v0.3.0 | 2026/07/04 | 星座型ビューの認識を修正（単一ノートブック内のグラフ可視化であり，複数ノートブック横断のクラスタ統合ではない）．他ノートブックとの関連は「提案→承認」による`cross_notebook_links`として再設計し，1〜9章の関連箇所を整合させた | 池田 琉俊 |
 | v0.4.0 | 2026/10/06 | 星座型ビューを「学習マップ」に改称し，現在地から次に学ぶノードを指す「コンパス」（ReqDef F-013）を追加．用語定義，4.2.8（現在地とコンパスの決定），API（`/constellation` → `/map`，コンパス情報の返却），UI方針，テスト方針を更新 | 池田 琉俊 |
 | v0.5.0 | 2026/10/06 | 一本道ビューを廃止（ReqDef F-005, F-008 廃止）．`display_order` とリニア変換（4.2.5）を廃止し，`importance_score` を `syllabus_nodes` に追加．コンパスを「必須前提を満たした未完了ノードをすべて示す」方式に変更し，現在地を進捗から決定（4.2.8）．ドリルダウンを学習マップ上に移し `GET /api/nodes/:id/children` を追加，`GET /api/notebooks/:id/syllabus` を削除．1〜9章を整合 | 池田 琉俊 |
+| v0.6.0 | 2026/10/06 | 4.1.2 を DB 定義の正と明記し，`users` テーブルを追加．ER図の `assessment_targets` と 4.2.3 の `assessment_results` を `assessment_answers` に統一．フロントエンドへのストリーミング方式を SSE に統一（3.1） | 池田 琉俊 |
