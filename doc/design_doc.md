@@ -1,4 +1,4 @@
-# Design Doc：学習プロセス提案アプリ（仮称）
+# Design Doc：Campass
 
 * **ステータス**: Draft
 * **著者**: 池田 琉俊
