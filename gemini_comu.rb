@@ -19,8 +19,11 @@ begin
   
   # コンテンツの生成
   response = client.models.generate_content(
-    model: 'gemini-2.5-flash',
-    contents: contents
+    model: 'gemini-3.1-flash-lite',
+    contents: contents,
+    config: {
+      temperature: 2 
+    }
   )
 
   # 結果の出力
