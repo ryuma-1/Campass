@@ -58,7 +58,7 @@ Defined in `doc/design_doc.md` section 4.3.1 (response examples are there too).
 | `POST /api/notebooks` | Create a notebook. |
 | `POST /api/notebooks/:id/goal_suggestions` | Goal candidates for vague input (F-002). |
 | `POST /api/notebooks/:id/assessment` | Get / answer prerequisite questions (F-004). |
-| `POST /api/notebooks/:id/syllabus` (SSE) | Start streaming generation; one event per node, may include link proposals (F-011). |
+| `POST /api/notebooks/:id/syllabus` (SSE) | Start streaming generation; one `node` event per node, a separate `link_proposal` event right after it if similar, then `done` or `error` (F-011). |
 | `GET /api/notebooks/:id/map` | `depth_level = 0` graph for the 学習マップ, including accepted cross-notebook links and `compass`. |
 | `GET /api/nodes/:id/children` | Drill-down (F-007): child nodes of a node and the edges between them. |
 | `GET /api/cross_notebook_links?status=proposed` | Pending link proposals. |

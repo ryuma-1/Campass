@@ -57,7 +57,7 @@ sequenceDiagram
         BE->>DB: save node + edges
         BE->>EMB: embed main-route node
         BE->>DB: create proposed cross-notebook link if similar
-        BE-->>FE: SSE node event (may include link proposal)
+        BE-->>FE: SSE node event (+ link_proposal event if similar)
     end
     BE->>DB: mark notebook ready
     FE->>BE: GET /api/notebooks/:id/map

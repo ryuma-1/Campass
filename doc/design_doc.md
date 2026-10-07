@@ -358,7 +358,7 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
 | `POST /api/notebooks` | ノートブック（学習テーマ）の新規作成． |
 | `POST /api/notebooks/:id/goal_suggestions` | 入力に対するゴール候補提案（F-002）． |
 | `POST /api/notebooks/:id/assessment` | 前提知識アセスメントの質問取得・回答送信（F-004）． |
-| `POST /api/notebooks/:id/syllabus` (SSE) | シラバス生成をストリーミングで開始し，ノード単位で逐次イベントを返す（F-011）．イベント内に4.2.7で検出したクロスノートブックリンクの提案を含む場合がある． |
+| `POST /api/notebooks/:id/syllabus` (SSE) | シラバス生成をストリーミングで開始し，ノード単位で逐次イベントを返す（F-011）．4.2.7で検出したクロスノートブックリンクの提案は，該当ノードのイベントの直後に独立したイベントとして返す．イベント形式は本節の「SSE イベント形式」を参照． |
 | `GET /api/notebooks/:id/map` | 当該ノートブックの `depth_level = 0` のシラバスグラフ（学習マップ）を，承認済みクロスノートブックリンクとコンパス情報（4.2.8）を含めて取得（新規）． |
 | `GET /api/nodes/:id/children` | ドリルダウン（F-007）．指定ノードの子ノード群とその間のエッジをグラフとして取得（新規）． |
 | `GET /api/cross_notebook_links?status=proposed` | ユーザーに提示すべき未応答の提案一覧を取得（新規）． |
@@ -461,13 +461,86 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
 { "status": "accepted" }
 ```
 
+**`POST /api/notebooks/:id/syllabus` SSE イベント形式**
+
+レスポンスの `Content-Type` は `text/event-stream` とする．各イベントは `event:` 行と `data:` 行（JSON を1行で記載）からなり，空行で区切る（4.5.6 の CLI の受信方式と同じ）．CLI は `Authorization: Bearer <token>` で認証する（4.5.4）．ブラウザ側の SSE 認証はフロントエンドの認証方式（9章）が未決のため未定とする．なお，ブラウザの `EventSource` は POST やリクエストヘッダーを指定できないため，フロントエンドでは `fetch` のストリーム読み取り等が必要になる．
+
+| イベント名 | 送信タイミング | 概要 |
+| :--- | :--- | :--- |
+| `node` | ノード1件分の JSON が確定し，DB に保存した直後 | 完成した1ノード．トークン断片は送らない（4.3.2）． |
+| `link_proposal` | 4.2.7 で提案が作られた直後（該当する `node` イベントの後） | クロスノートブックリンクの提案1件．`node` には入れ子にしない． |
+| `done` | 全ノードの生成が完了し，ノートブックを `ready` にした後 | 終端イベント． |
+| `error` | 生成を続けられなくなったとき | 終端イベント． |
+
+* `node` の `data` は次の項目を持つ．`id` は DB 保存後のノード ID であり，`prerequisites` の各要素も保存後の ID とする．`GET /api/notebooks/:id/map` のノード表現と共通する項目（`id`，`title`，`route_type`，`importance_score` など）は，同じ名前・意味とする．埋め込みベクトルは含めない．
+
+  | 項目 | 型 | 説明 |
+  | :--- | :--- | :--- |
+  | `id` | number | `syllabus_nodes.id` |
+  | `title` | string | ノードのタイトル |
+  | `summary` | string | ノードの要約 |
+  | `prerequisites` | number[] | 前提ノードの ID（4.2.4） |
+  | `route_type` | string | `main` / `sub` |
+  | `importance_score` | number | 0〜1 |
+  | `depth_level` | number | ドリルダウンの階層（F-007） |
+  | `parent_node_id` | number \| null | ドリルダウンの親ノード ID（F-007）．`depth_level = 0` の場合は `null` |
+  | `related_main_node_id` | number \| null | `route_type = sub` の場合の紐付け先メインノード |
+
+* `link_proposal` の `data` は `GET /api/cross_notebook_links?status=proposed` の `proposals` の要素と同じ形（`link_id`，`similarity_score`，`source`，`target`）とする．`source.node_id` は直前に送った `node` の `id` と一致する．
+* `done` の `data` は `notebook_id`，`status`（`"ready"` 固定），`node_count`（保存したノード数）を持つ．
+* `error` の `data` は `code`，`message`，`retryable` を持つ．`message` は利用者に表示してよい文言とし，内部例外の詳細や API キーは含めない．`retryable` はクライアントが生成のやり直しを提案してよいかを示す．
+
+  | `code` | 意味 | `retryable` |
+  | :--- | :--- | :--- |
+  | `parse_failed` | LLM 出力のパースに失敗し，リトライ上限（最大2回，4.2.4）を超えた | `true` |
+  | `invalid_syllabus` | 循環や未知の前提 ID など DAG の検証エラー．該当エッジを黙って除去・修正しない | `true` |
+  | `llm_api_error` | LLM API の呼び出しに失敗した | `true` |
+  | `internal_error` | 上記以外のサーバー内部エラー | `false` |
+
+* Embedding API の呼び出しに失敗した場合（4.2.7）は `error` を送らず，生成を続ける．リンク提案は補助的な機能であり，その失敗でシラバス生成全体を止めないためである．該当ノードの `link_proposal` は送らず，失敗はサーバーのログに記録する．
+* `done` と `error` は終端イベントであり，サーバーはどちらかを送った後に接続を閉じる．クライアントは終端イベントを受け取らずに接続が切れた場合，生成が完了していないものとして扱う．切断時の再接続・再開の挙動は未決（9章）のため，`id:` 行による再開は定義しない．
+* 接続維持のため，サーバーはコメント行（`: keep-alive`）を送ってよい．クライアントはコメント行を無視する．
+
+**`POST /api/notebooks/:id/syllabus` SSE レスポンス例（正常終了）**
+
+```
+event: node
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
+
+event: link_proposal
+data: {"link_id":8801,"similarity_score":0.86,"source":{"notebook_id":123,"notebook_title":"AIエンジニアリング入門","node_id":501,"title":"統計学の基礎"},"target":{"notebook_id":124,"notebook_title":"データ分析基礎","node_id":733,"title":"統計学の基礎"}}
+
+event: node
+data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","prerequisites":[501],"route_type":"main","importance_score":0.9,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
+
+: keep-alive
+
+event: node
+data: {"id":620,"title":"ベイズ統計への招待","summary":"確率の更新という考え方に触れる","prerequisites":[501],"route_type":"sub","importance_score":0.3,"depth_level":0,"parent_node_id":null,"related_main_node_id":501}
+
+event: done
+data: {"notebook_id":123,"status":"ready","node_count":3}
+
+```
+
+**`POST /api/notebooks/:id/syllabus` SSE レスポンス例（エラー終了）**
+
+```
+event: node
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
+
+event: error
+data: {"code":"parse_failed","message":"シラバスの生成結果を解析できませんでした．時間をおいて再度お試しください．","retryable":true}
+
+```
+
 > 学習マップの画面遷移・URL構成（例：ノートブック一覧から学習マップへどう遷移するか，提案をどこで通知するか）は 9章の論点確定後に追記する．
 
 #### 4.3.2 バックエンド–LLM API
 
 * プロンプトテンプレートはソースコードから切り離して管理する（ReqDef 5.4）．具体的には，YAML等の外部ファイル，または LangChain/LangSmith 等のオーケストレーションツールでのバージョン管理を想定し，無停止でのA/Bテスト・チューニングを可能にする．
 * LLM APIへのリクエスト時には，各社が提供する「学習利用オプトアウト」設定を必須パラメータとして常に付与する（ReqDef 5.3）．
-* ストリーミングレスポンスは，LLM側のトークン単位のストリームをバックエンドで「1ノード分のJSONが確定した時点」でバッファリングし直し，フロントエンドへはノード単位のSSEイベントとして中継する．これにより，フロントエンドはトークン断片ではなく意味のある単位で描画できる．
+* ストリーミングレスポンスは，LLM側のトークン単位のストリームをバックエンドで「1ノード分のJSONが確定した時点」でバッファリングし直し，フロントエンドへはノード単位のSSEイベントとして中継する．これにより，フロントエンドはトークン断片ではなく意味のある単位で描画できる．イベント名とペイロードの形式は 4.3.1 の「SSE イベント形式」に定める．
 * クロスノートブックリンクの検出（4.2.7）で使用する埋め込み計算も，シラバス生成と同じLLMベンダーのEmbedding APIを利用し，APIキー管理・オプトアウト設定は同一の仕組みに乗せる．
 
 ### 4.4 UI/UX設計方針（認知負荷の軽減）
@@ -522,7 +595,7 @@ cli/
 1. 興味を自由入力させ，ゴール候補（F-002）が返った場合は番号付きで表示して選ばせる．再入力の扱いは 4.2.1 に従い，バックエンドが判定する．
 2. 難易度（ライト／スタンダード／ディープ）を番号で選ばせる（F-003）．
 3. アセスメントの質問（F-004）を1問ずつ表示し，回答を送信する．
-4. `POST /api/notebooks/:id/syllabus` の SSE を受信し，ノードが1件届くたびにタイトルと種別（メイン／サブ）を1行で表示する（4.5.6）．イベントにクロスノートブックリンクの提案が含まれる場合は，「提案」であることが分かる形で表示する．ここでは承認しない．
+4. `POST /api/notebooks/:id/syllabus` の SSE を受信し，ノードが1件届くたびにタイトルと種別（メイン／サブ）を1行で表示する（4.5.6）．`link_proposal` イベントが届いた場合は，「提案」であることが分かる形で表示する．ここでは承認しない．
 5. ストリームが終わったら `GET /api/notebooks/:id/map` を呼び，学習マップとコンパスを表示する（4.5.5）．
 
 #### 4.5.4 認証
@@ -560,13 +633,15 @@ cli/
 
 #### 4.5.6 シラバス生成のストリーミング受信
 
-* SSE のレスポンスを `bufio.Scanner` で1行ずつ読み，空行までの `data:` 行をつなげて1イベントとし，JSON としてデコードする．1イベントが1ノードに対応するため（4.3.2），デコードできたらすぐに表示する．
+* SSE のレスポンスを `bufio.Scanner` で1行ずつ読み，空行までの `data:` 行をつなげて1イベントとし，JSON としてデコードする．`event:` 行のイベント名で処理を分岐する（形式は 4.3.1）．`node` は1イベントが1ノードに対応するため（4.3.2），デコードできたらすぐに表示する．`link_proposal` は「提案」として表示する（4.5.3）．
 * `bufio.Scanner` は既定で1行64KBまでしか読めないため，`summary` の長いノードに備えて上限を広げる．
+* `done` を受け取ったら受信を終えて `GET /api/notebooks/:id/map` に進む．`error` を受け取ったら `code` と `message` を表示して終了する．どちらも受け取らずに接続が切れた場合は，生成が完了していないものとしてエラー表示する．
+* `:` で始まるコメント行は無視する．未知のイベント名は，エラーにせず読み飛ばす．
 * JSON としてデコードできないイベントは，黙って捨てずにエラーとして表示する．
 
 #### 4.5.7 未決事項
 
-CLI に関わる未決事項は 9章にまとめる（SSE のイベント形式，ノード詳細の取得，生成中の中断，認証まわり，配布方法）．
+CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得，生成中の中断，認証まわり，配布方法）．
 
 ## 5. 検討した代替案（Alternatives Considered）
 
@@ -665,7 +740,6 @@ CLI に関わる未決事項は 9章にまとめる（SSE のイベント形式�
 * クロスノートブックリンクの関連度判定（4.2.7）における類似度の閾値（暫定 0.80）は実データでの検証が必要．また，1つの新規ノードに対して複数の提案が生成された場合の表示上限やまとめ方も未検討．
 * LLM生成コンテンツの品質担保（幻覚対策）について，将来的にファクトチェック機構やユーザーフィードバックによる品質改善ループを設けるか．
 * ストリーミング中にユーザーが離脱・再訪した場合の生成状態の扱い（生成継続／破棄／再開）．CLI（4.5）で生成中に Ctrl+C で接続が切れた場合も同じ論点として合わせて決める．
-* **SSE のイベント形式**: `POST /api/notebooks/:id/syllabus` のイベント名，ノードとリンク提案のペイロード，終了・エラーの通知方法が 4.3.1 で未定義．フロントエンドと CLI の SSE 受信はこれに依存する．
 * **ノード詳細の取得**: 学習マップは `summary` を含まず（4.4），ノード単体の詳細を取得する API が未定義．フロントエンドで地点を選んだときの詳細表示と，CLI の `campass show` に共通の課題．
 * **フロントエンドの認証方式**: フロントエンドを Cookie セッションにするか，CLI と同じトークン方式（4.5.4，5.6）にするか．
 * **CLI トークンの有効期限**: `api_tokens.expires_at` に設定する期間と，期限切れ時の扱い．
@@ -684,3 +758,4 @@ CLI に関わる未決事項は 9章にまとめる（SSE のイベント形式�
 | v0.5.0 | 2026/10/06 | 一本道ビューを廃止（ReqDef F-005, F-008 廃止）．`display_order` とリニア変換（4.2.5）を廃止し，`importance_score` を `syllabus_nodes` に追加．コンパスを「必須前提を満たした未完了ノードをすべて示す」方式に変更し，現在地を進捗から決定（4.2.8）．ドリルダウンを学習マップ上に移し `GET /api/nodes/:id/children` を追加，`GET /api/notebooks/:id/syllabus` を削除．1〜9章を整合 | 池田 琉俊 |
 | v0.6.0 | 2026/10/06 | 4.1.2 を DB 定義の正と明記し，`users` テーブルを追加．ER図の `assessment_targets` と 4.2.3 の `assessment_results` を `assessment_answers` に統一．フロントエンドへのストリーミング方式を SSE に統一（3.1） | 池田 琉俊 |
 | v0.7.0 | 2026/10/06 | CLI クライアント（ReqDef F-014）を追加．4.5（CLI設計），`api_tokens` テーブル，トークン発行・失効 API と `GET /api/notebooks` を追加し，4.3.1 をクライアント共通の API とした．5.5・5.6 に代替案，6〜7章に CLI の懸念事項とテスト方針，9章に CLI 関連の論点を追加 | 池田 琉俊 |
+| v0.8.0 | 2026/10/07 | シラバス生成 SSE のイベント形式を 4.3.1 に定義（`node` / `link_proposal` / `done` / `error`，エラーコード，終端の扱い，Embedding API 失敗時の扱い，レスポンス例）．リンク提案を `node` から独立したイベントとし，4.3.2，4.5.3，4.5.6，4.5.7 を整合．9章から解決済みの論点を削除 | 池田 琉俊 |
