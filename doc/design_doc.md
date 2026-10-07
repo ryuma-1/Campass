@@ -483,6 +483,7 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
   | `route_type` | string | `main` / `sub` |
   | `importance_score` | number | 0〜1 |
   | `depth_level` | number | ドリルダウンの階層（F-007） |
+  | `parent_node_id` | number \| null | ドリルダウンの親ノード ID（F-007）．`depth_level = 0` の場合は `null` |
   | `related_main_node_id` | number \| null | `route_type = sub` の場合の紐付け先メインノード |
 
 * `link_proposal` の `data` は `GET /api/cross_notebook_links?status=proposed` の `proposals` の要素と同じ形（`link_id`，`similarity_score`，`source`，`target`）とする．`source.node_id` は直前に送った `node` の `id` と一致する．
@@ -493,9 +494,10 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
   | :--- | :--- | :--- |
   | `parse_failed` | LLM 出力のパースに失敗し，リトライ上限（最大2回，4.2.4）を超えた | `true` |
   | `invalid_syllabus` | 循環や未知の前提 ID など DAG の検証エラー．該当エッジを黙って除去・修正しない | `true` |
-  | `llm_api_error` | LLM API／Embedding API の呼び出しに失敗した | `true` |
+  | `llm_api_error` | LLM API の呼び出しに失敗した | `true` |
   | `internal_error` | 上記以外のサーバー内部エラー | `false` |
 
+* Embedding API の呼び出しに失敗した場合（4.2.7）は `error` を送らず，生成を続ける．リンク提案は補助的な機能であり，その失敗でシラバス生成全体を止めないためである．該当ノードの `link_proposal` は送らず，失敗はサーバーのログに記録する．
 * `done` と `error` は終端イベントであり，サーバーはどちらかを送った後に接続を閉じる．クライアントは終端イベントを受け取らずに接続が切れた場合，生成が完了していないものとして扱う．切断時の再接続・再開の挙動は未決（9章）のため，`id:` 行による再開は定義しない．
 * 接続維持のため，サーバーはコメント行（`: keep-alive`）を送ってよい．クライアントはコメント行を無視する．
 
@@ -503,18 +505,18 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
 
 ```
 event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"related_main_node_id":null}
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
 
 event: link_proposal
 data: {"link_id":8801,"similarity_score":0.86,"source":{"notebook_id":123,"notebook_title":"AIエンジニアリング入門","node_id":501,"title":"統計学の基礎"},"target":{"notebook_id":124,"notebook_title":"データ分析基礎","node_id":733,"title":"統計学の基礎"}}
 
 event: node
-data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","prerequisites":[501],"route_type":"main","importance_score":0.9,"depth_level":0,"related_main_node_id":null}
+data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","prerequisites":[501],"route_type":"main","importance_score":0.9,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
 
 : keep-alive
 
 event: node
-data: {"id":620,"title":"ベイズ統計への招待","summary":"確率の更新という考え方に触れる","prerequisites":[501],"route_type":"sub","importance_score":0.3,"depth_level":0,"related_main_node_id":501}
+data: {"id":620,"title":"ベイズ統計への招待","summary":"確率の更新という考え方に触れる","prerequisites":[501],"route_type":"sub","importance_score":0.3,"depth_level":0,"parent_node_id":null,"related_main_node_id":501}
 
 event: done
 data: {"notebook_id":123,"status":"ready","node_count":3}
@@ -525,7 +527,7 @@ data: {"notebook_id":123,"status":"ready","node_count":3}
 
 ```
 event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"related_main_node_id":null}
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
 
 event: error
 data: {"code":"parse_failed","message":"シラバスの生成結果を解析できませんでした．時間をおいて再度お試しください．","retryable":true}
@@ -756,4 +758,4 @@ CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得�
 | v0.5.0 | 2026/10/06 | 一本道ビューを廃止（ReqDef F-005, F-008 廃止）．`display_order` とリニア変換（4.2.5）を廃止し，`importance_score` を `syllabus_nodes` に追加．コンパスを「必須前提を満たした未完了ノードをすべて示す」方式に変更し，現在地を進捗から決定（4.2.8）．ドリルダウンを学習マップ上に移し `GET /api/nodes/:id/children` を追加，`GET /api/notebooks/:id/syllabus` を削除．1〜9章を整合 | 池田 琉俊 |
 | v0.6.0 | 2026/10/06 | 4.1.2 を DB 定義の正と明記し，`users` テーブルを追加．ER図の `assessment_targets` と 4.2.3 の `assessment_results` を `assessment_answers` に統一．フロントエンドへのストリーミング方式を SSE に統一（3.1） | 池田 琉俊 |
 | v0.7.0 | 2026/10/06 | CLI クライアント（ReqDef F-014）を追加．4.5（CLI設計），`api_tokens` テーブル，トークン発行・失効 API と `GET /api/notebooks` を追加し，4.3.1 をクライアント共通の API とした．5.5・5.6 に代替案，6〜7章に CLI の懸念事項とテスト方針，9章に CLI 関連の論点を追加 | 池田 琉俊 |
-| v0.8.0 | 2026/10/07 | シラバス生成 SSE のイベント形式を 4.3.1 に定義（`node` / `link_proposal` / `done` / `error`，エラーコード，終端の扱い，レスポンス例）．リンク提案を `node` から独立したイベントとし，4.3.2，4.5.3，4.5.6，4.5.7 を整合．9章から解決済みの論点を削除 | 池田 琉俊 |
+| v0.8.0 | 2026/10/07 | シラバス生成 SSE のイベント形式を 4.3.1 に定義（`node` / `link_proposal` / `done` / `error`，エラーコード，終端の扱い，Embedding API 失敗時の扱い，レスポンス例）．リンク提案を `node` から独立したイベントとし，4.3.2，4.5.3，4.5.6，4.5.7 を整合．9章から解決済みの論点を削除 | 池田 琉俊 |
