@@ -1,6 +1,6 @@
 # Overall Architecture
 
-Design as defined in `doc/basic_design.md` section 2 and `doc/design_doc.md` sections 3–4. Nothing below is implemented yet; when implementing, follow these decisions unless the design docs are updated first. Frontend and backend internals are in `frontend.md` and `backend.md`.
+Design as defined in `docs/basic_design.md` section 2 and `docs/design_doc.md` sections 3–4. Nothing below is implemented yet; when implementing, follow these decisions unless the design docs are updated first. Frontend and backend internals are in `frontend.md` and `backend.md`. Domain terms (マップ, ノード, 道, メインノード, サブノード, 寄り道, 元ノード, 既知ノード, …) follow `GLOSSARY.md`; decisions behind the model are in `docs/adr/`.
 
 ## System diagram
 
@@ -9,7 +9,7 @@ graph LR
     User[User / Browser]
 
     subgraph FE[Frontend: React SPA]
-        FEApp[学習マップ + compass UI]
+        FEApp[Map screen + compass UI]
     end
 
     subgraph BE[Backend: Rails API]
@@ -18,18 +18,16 @@ graph LR
 
     DB[(MySQL 8.0)]
     LLM[External LLM API]
-    EMB[External Embedding API]
 
     User -->|HTTPS| FEApp
     FEApp -->|REST| BEApp
     BEApp -.->|SSE: one event per node| FEApp
     BEApp -->|ActiveRecord| DB
     BEApp -->|streaming request, opt-out on| LLM
-    BEApp -->|embedding request| EMB
 ```
 
-- The frontend talks only to the backend. Only the backend calls the LLM and Embedding APIs, and only the backend holds their API keys.
-- Syllabus generation is streamed: LLM tokens → backend buffers until one node is complete → save to DB → one SSE event to the frontend.
+- The frontend talks only to the backend. Only the backend calls the LLM API and holds its key.
+- Map generation is streamed: LLM tokens → backend buffers until one node is complete → save to DB → one SSE event to the frontend.
 
 ## Main flow (design_doc 3.2)
 
@@ -39,56 +37,52 @@ sequenceDiagram
     participant FE as Frontend
     participant BE as Backend
     participant LLM as LLM API
-    participant EMB as Embedding API
     participant DB as MySQL
 
     U->>FE: free-text interest (F-001)
-    FE->>BE: POST /api/notebooks/:id/goal_suggestions
+    FE->>BE: POST /api/maps/:id/goal_suggestions
     BE->>LLM: is the goal specific enough?
     LLM-->>BE: 3 goal candidates if vague (F-002)
     U->>FE: choose goal + difficulty (F-003)
-    FE->>BE: POST /api/notebooks/:id/assessment
+    FE->>BE: POST /api/maps/:id/assessment
     BE->>LLM: generate 3-5 questions (F-004)
     U->>FE: answer questions
-    FE->>BE: POST /api/notebooks/:id/syllabus (SSE)
-    BE->>LLM: generate syllabus (streaming, JSON Schema)
+    FE->>BE: POST /api/maps/:id/generation (SSE)
+    BE->>DB: load the user's existing nodes
+    BE->>LLM: generate map (streaming, JSON Schema, existing nodes to reuse)
     loop each completed node
         LLM-->>BE: tokens
-        BE->>DB: save node + edges
-        BE->>EMB: embed main-route node
-        BE->>DB: create proposed cross-notebook link if similar
-        BE-->>FE: SSE node event (+ link_proposal event if similar)
+        BE->>DB: save node / map_nodes / paths / sub_nodes / detour
+        BE-->>FE: SSE node event
     end
-    BE->>DB: mark notebook ready
-    FE->>BE: GET /api/notebooks/:id/map
-    BE-->>FE: depth-0 graph + links + compass
+    BE->>DB: mark map ready
+    FE->>BE: GET /api/maps/:id
+    BE-->>FE: main nodes + paths + compass
     U->>FE: pick a compass candidate, update progress
-    FE->>BE: PATCH /api/nodes/:id/progress
+    FE->>BE: PATCH /api/maps/:mapId/nodes/:nodeId/progress
     BE-->>FE: updated compass
 ```
 
 ## Shared data model
 
-The syllabus is a DAG stored as relational node + edge tables, not in a graph DB (`doc/design_doc.md` section 5.1).
+The map is a DAG stored as relational node + path tables, not in a graph DB (`docs/design_doc.md` section 5.1). Nodes belong to the user and are shared across maps (ADR 0003):
 
-- `syllabus_nodes`: `route_type` (`main` / `sub`), `depth_level`, `parent_node_id`, `related_main_node_id`, `importance_score` (LLM-assigned, 0–1), `embedding` (main-route nodes only).
-- `syllabus_edges`: prerequisite relations between nodes.
-- `cross_notebook_links`: links between nodes in different notebooks of the same user, with status `proposed` / `accepted` / `rejected` and a unique constraint per node pair.
+- Shared: `nodes` (title, summary), `sub_nodes` + `sub_node_paths` (a node's contents), `progress_statuses` (one progress per node, plus `started_map_id`).
+- Per map: `map_nodes` (which nodes are main nodes here, `importance_score`), `map_paths` (paths between main nodes), `detours` (max one per main node), `maps.current_node_id`, `maps.origin_node_id`.
 
-Full table definitions: `doc/design_doc.md` section 4.1.2 (the source of truth; `doc/basic_design.md` section 4 is only an overview).
+Full table definitions: `docs/design_doc.md` section 4.1.2 (the source of truth; `docs/basic_design.md` section 4 is only an overview).
 
-The 学習マップ shows this graph as-is. There is **no linear roadmap view and no stored order** (`display_order` and the linearization algorithm were removed in design_doc v0.5.0). Do not reintroduce them.
+The map screen shows this graph as-is. There is **no linear roadmap view and no stored order** (`display_order` and the linearization algorithm were removed in design_doc v0.5.0). Do not reintroduce them.
 
 ## Concept: map + compass
 
-The app's concept (and its name, Campass) is "spread out a map and check the compass": the 学習マップ shows the whole syllabus, and a **compass** points from the learner's **current position** to **every node the learner can study now** (F-013, `doc/design_doc.md` section 4.2.8).
+The app's concept (and its name, Campass) is "spread out a map and check the compass": the map shows the whole graph for one goal, and a **compass** points from the learner's **current position** to **every node the learner can study now** (F-013, `docs/design_doc.md` section 4.2.8).
 
-- The "map" is a metaphor only. Nodes have no coordinates; the 学習マップ is drawn as a network graph.
-- Current position = the `in_progress` node (latest `updated_at` if several); otherwise the most recently completed node (`completed_at`); otherwise none (start point).
-- Compass candidates = incomplete main-route nodes whose `required` main-route prerequisites are all completed. All candidates are shown; the user chooses. `importance_score` only decides which candidate is highlighted.
-- The compass is derived from `syllabus_edges` + `progress_statuses` each time. It is not stored.
-- `sub` nodes (寄り道) are never the current position or the compass target.
+- The "map" is a metaphor only. Nodes have no coordinates; the map is drawn as a network graph.
+- Current position is stored per map (`maps.current_node_id`): the main node last started or completed in that map; `null` is the start point.
+- Compass candidates are derived each time, never stored: unfinished main nodes that are not known nodes, whose incoming paths all come from nodes that are completed or known. A known node is in progress in another map (`started_map_id` is another map) or completed.
+- The compass guides; the learner may start any node, and completion is always the learner's decision (the system never auto-completes a node).
 
 ## Undecided
 
-The screen flow for the 学習マップ and for presenting cross-notebook-link proposals, and what happens when a user leaves during generation, are still undecided (`doc/design_doc.md` section 9). Confirm with the user before implementing them.
+What happens when a user leaves during generation, frontend auth, and the details of F-016 / F-017 are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.

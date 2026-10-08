@@ -9,5 +9,5 @@
 ## LLM / streaming failures
 
 - A response that fails JSON parsing is retried at most 2 times (see `llm-integration.md`). After that, return an explicit error to the client instead of saving partial or invalid data as if it succeeded.
-- If streaming fails partway, the nodes already saved and the nodes already sent to the frontend must stay consistent. The design notes that rollback here is complex (`doc/design_doc.md` section 5.2); confirm the approach with the user before implementing it.
-- LLM output that breaks DAG rules (cycles, references to unknown prerequisite ids) is a validation error. Do not silently drop or fix those edges.
+- If streaming fails partway, the nodes already saved and the nodes already sent to the frontend must stay consistent. The design notes that rollback here is complex (`docs/design_doc.md` section 5.2); confirm the approach with the user before implementing it.
+- LLM output that breaks the map rules (cycles in paths or sub nodes, unknown references) is a validation error. Do not silently drop or fix those paths.

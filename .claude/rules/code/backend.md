@@ -1,6 +1,6 @@
 # Backend Architecture
 
-Ruby on Rails 7.1 in API mode. Design from `doc/basic_design.md` section 2.3 and `doc/design_doc.md` sections 4.2–4.3. Not implemented yet (no Rails app has been generated).
+Ruby on Rails 7.1 in API mode. Design from `docs/basic_design.md` section 2.3 and `docs/design_doc.md` sections 4.2–4.3. Not implemented yet (no Rails app has been generated).
 
 ## Layers
 
@@ -10,13 +10,12 @@ graph TD
 
     subgraph BE[Backend: Rails API]
         C["Controller layer<br/>REST responses, SSE streaming"]
-        S["Service layer<br/>syllabus generation, compass,<br/>link detection, prompt building"]
+        S["Service layer<br/>map generation, node reuse,<br/>compass, prompt building"]
         M["Model layer<br/>ActiveRecord"]
     end
 
     DB[(MySQL)]
     LLM[LLM API]
-    EMB[Embedding API]
 
     FE -->|REST| C
     C -.->|SSE| FE
@@ -24,55 +23,56 @@ graph TD
     S --> M
     M --> DB
     S -->|streaming, JSON Schema| LLM
-    S --> EMB
 ```
 
 | Layer | Responsibility |
 | :--- | :--- |
 | Controller | Accepts API requests and returns normal or SSE responses. No business logic. |
-| Service | Business logic and all external API calls (LLM, Embedding). |
+| Service | Business logic and all LLM API calls. |
 | Model | MySQL access through ActiveRecord. |
 
-## Syllabus generation pipeline
+## Map generation pipeline
 
 ```mermaid
 graph LR
-    A[LLM token stream] --> B[Buffer until one node's JSON is complete]
-    B --> C{Valid node?}
-    C -->|yes| D[Save node + edges]
+    P[Prompt with the user's existing nodes] --> A[LLM token stream]
+    A --> B[Buffer until one node's JSON is complete]
+    B --> C{Valid?}
+    C -->|yes| D[Save node or reuse existing,<br/>map_nodes / paths / sub_nodes / detour]
     C -->|no| R[Retry request, max 2] --> A
-    D --> E[Embed main-route node, check similarity]
-    E --> F[Send one SSE event]
+    D --> F[Send one SSE node event]
     F --> A
-    A -->|stream ends| G[Mark notebook ready]
+    A -->|stream ends| G[Mark map ready]
 ```
 
 See `llm-integration.md` for LLM call rules and `../meta/error.md` for failure handling.
 
 ## API endpoints
 
-Defined in `doc/design_doc.md` section 4.3.1 (response examples are there too).
+Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 
 | Endpoint | Purpose |
 | :--- | :--- |
-| `POST /api/notebooks` | Create a notebook. |
-| `POST /api/notebooks/:id/goal_suggestions` | Goal candidates for vague input (F-002). |
-| `POST /api/notebooks/:id/assessment` | Get / answer prerequisite questions (F-004). |
-| `POST /api/notebooks/:id/syllabus` (SSE) | Start streaming generation; one `node` event per node, a separate `link_proposal` event right after it if similar, then `done` or `error` (F-011). |
-| `GET /api/notebooks/:id/map` | `depth_level = 0` graph for the 学習マップ, including accepted cross-notebook links and `compass`. |
-| `GET /api/nodes/:id/children` | Drill-down (F-007): child nodes of a node and the edges between them. |
-| `GET /api/cross_notebook_links?status=proposed` | Pending link proposals. |
-| `PATCH /api/cross_notebook_links/:id` | Accept / reject a proposal. |
-| `PATCH /api/nodes/:id/progress` | Update node progress (F-010); returns the updated `compass`. |
+| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `POST` takes `origin_node_id` or `detour_id` (F-017, F-006). |
+| `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map / preview what deletion affects. |
+| `POST /api/maps/:id/goal_suggestions` | Goal candidates for vague input (F-002). |
+| `POST /api/maps/:id/assessment` | Get / answer prerequisite questions (F-004). |
+| `POST /api/maps/:id/generation` (SSE) | Start streaming generation; one `node` event per node, then `done` or `error` (F-011). |
+| `GET /api/maps/:id` | Main nodes, paths, detour entrances, origin links, and `compass`. |
+| `GET /api/maps/:mapId/nodes/:nodeId` | Node detail: summary, progress, this map's detour, other maps it appears in. |
+| `GET /api/nodes/:id/sub_nodes` | Drill-down (F-007): sub nodes and the paths among them (shared, no map). |
+| `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | Update progress (F-010); updates the map's current position and `started_map_id`; returns `compass` and `origin_completion_suggestion`. |
 
 ## Core algorithms
 
-- **No linearization.** `display_order` and the topological-sort step were removed (F-005, F-008 are 廃止). Do not add a stored order. `sub` nodes attach to a main node through `related_main_node_id` (F-006).
-- **Compass (F-013, design_doc 4.2.8)**: decided in the backend over `depth_level = 0` main-route nodes, recomputed on every progress update, never stored.
-  - Current position: the `in_progress` node with the latest `updated_at`; else the node with the latest `completed_at`; else `null` (start point).
-  - Candidates: every incomplete node whose prerequisites via `relation_type = 'required'` edges (main-route only) are all completed. `in_progress` nodes are included. Sort by `importance_score` desc, then `id`. Return all of them.
-  - If every node is completed, return `is_goal_reached: true` and empty `candidates`.
-  - `sub` nodes and `supplementary` edges are ignored.
-- **Drill-down (F-007)**: children are found by `parent_node_id` and returned as a graph (nodes + edges among them).
-- **Difficulty (F-003)**: ライト / スタンダード / ディープ map to prompt limits such as `max_depth`.
-- **Cross-notebook links (design_doc 4.2.7)**: compare embeddings of main-route nodes against the same user's other notebooks. Pairs at or above the threshold (provisionally 0.80, kept conservative) become `proposed`. Never compare against other users' nodes, never create a duplicate pair, and never propose a rejected pair again.
+- **No linearization.** `display_order` and the topological-sort step were removed (F-005, F-008 are 廃止). Do not add a stored order.
+- **Node reuse (F-015, design_doc 4.2.4)**: send the user's existing nodes (with their sub nodes) to the LLM; it reuses them by ID instead of creating duplicates, and may add sub nodes to a reused node. For a map made from an origin node, its new main nodes also become sub nodes of the origin node. Never reuse another user's nodes.
+- **Compass (F-013, design_doc 4.2.8)**: over the map's main nodes, recomputed on every progress update, never stored.
+  - Current position: `maps.current_node_id`, set when a main node is started or completed in that map.
+  - Known node: `completed`, or `in_progress` with `started_map_id` set to another map (`NULL` counts as this map).
+  - Candidates: not completed, not known, and every incoming `map_paths` source is completed or known. Sort by `importance_score` desc, then `id`. Return all of them.
+  - Goal reached: every main node completed; return `is_goal_reached: true` and empty `candidates`. Never auto-complete the origin node; return a suggestion instead.
+  - Sub node progress is recorded but ignored by the compass.
+- **Drill-down (F-007)**: sub nodes come from `sub_nodes` and are the same in every map.
+- **Difficulty (F-003)**: ライト / スタンダード / ディープ map to `max_depth` and `node_count_target`.
+- **Map deletion**: cascade `map_nodes`, `map_paths`, `detours`; delete a node only when no map and no node references it.
