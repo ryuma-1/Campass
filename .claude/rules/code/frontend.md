@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-React SPA. Design from `doc/basic_design.md` sections 2.2 and 3, and `doc/design_doc.md` section 4.4. Not implemented yet; the directory layout and libraries (router, state management, graph rendering) are not chosen. Ask the user before adding any npm package.
+React SPA. Design from `docs/basic_design.md` sections 2.2 and 3, and `docs/design_doc.md` section 4.4. Not implemented yet; the directory layout and libraries (router, state management, graph rendering) are not chosen. Ask the user before adding any npm package.
 
 ## Layers
 

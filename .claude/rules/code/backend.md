@@ -1,6 +1,6 @@
 # Backend Architecture
 
-Ruby on Rails 7.1 in API mode. Design from `doc/basic_design.md` section 2.3 and `doc/design_doc.md` sections 4.2–4.3. Not implemented yet (no Rails app has been generated).
+Ruby on Rails 7.1 in API mode. Design from `docs/basic_design.md` section 2.3 and `docs/design_doc.md` sections 4.2–4.3. Not implemented yet (no Rails app has been generated).
 
 ## Layers
 
@@ -51,7 +51,7 @@ See `llm-integration.md` for LLM call rules and `../meta/error.md` for failure h
 
 ## API endpoints
 
-Defined in `doc/design_doc.md` section 4.3.1 (response examples are there too).
+Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 
 | Endpoint | Purpose |
 | :--- | :--- |

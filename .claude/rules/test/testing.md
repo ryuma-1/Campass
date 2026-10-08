@@ -4,7 +4,7 @@ No test suite or test framework is set up yet. Do not add a test framework (e.g.
 
 ## What must be tested once implemented
 
-From `doc/design_doc.md` section 7:
+From `docs/design_doc.md` section 7:
 
 - **Syllabus structure**: JSON Schema validation of LLM output, plus detection of cycles (invalid DAG edges) and orphan nodes.
 - **Compass**: for syllabi in different progress states (nothing started, partly completed, several `in_progress`, only sub nodes completed, all completed) and graphs with branches, merges, and `supplementary` edges, check `current_node_id`, `candidates` (contents and order), and `is_goal_reached`.

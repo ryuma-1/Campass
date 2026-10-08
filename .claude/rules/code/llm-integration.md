@@ -1,6 +1,6 @@
 # LLM Integration
 
-Rules for code that calls the LLM or Embedding APIs. Based on `doc/design_doc.md` sections 4.2.4, 4.3.2 and 6.
+Rules for code that calls the LLM or Embedding APIs. Based on `docs/design_doc.md` sections 4.2.4, 4.3.2 and 6.
 
 ## API keys
 
@@ -17,13 +17,13 @@ Rules for code that calls the LLM or Embedding APIs. Based on `doc/design_doc.md
 
 - The backend reads the LLM token stream and buffers it until one node's JSON is complete. It then saves that node to the DB and sends it to the frontend as one SSE event.
 - Never forward partial token fragments to the frontend.
-- What happens to the generation when the user leaves mid-stream is still undecided (`doc/design_doc.md` section 9).
+- What happens to the generation when the user leaves mid-stream is still undecided (`docs/design_doc.md` section 9).
 
 ## Prompt safety
 
 - Keep the system prompt separate from user input. Never put user free text into the instruction part of the prompt.
-- Always attach the opt-out setting (no training on user data) to every LLM request (`doc/basic_design.md` section 5.4).
+- Always attach the opt-out setting (no training on user data) to every LLM request (`docs/basic_design.md` section 5.4).
 
 ## Prompt templates
 
-Prompt templates should be managed separately from the code deploy cycle, so they can be tuned and A/B tested without a redeploy (`doc/design_doc.md` section 8).
+Prompt templates should be managed separately from the code deploy cycle, so they can be tuned and A/B tested without a redeploy (`docs/design_doc.md` section 8).
