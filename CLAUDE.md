@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Project Overview
 
-Campass is a learning-path recommendation app. The user enters a goal, an LLM generates a syllabus as a dependency graph (JSON), and the app shows it as a 学習マップ (learning map) with a compass that points to the nodes the learner can study next ("トップダウン逆算型ボトムアップ学習"). There is no linear roadmap view (removed in ReqDef v1.2.0).
+Campass is a learning-path recommendation app. The user enters a goal, an LLM generates a マップ (a graph of nodes and 道), and the app shows it with a compass that points to the nodes the learner can study next ("トップダウン逆算型ボトムアップ学習"). Nodes belong to the user and are shared across maps. There is no linear roadmap view (removed in ReqDef v1.2.0).
 
 ## Source of Truth
 
-- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-013` (F-005 and F-008 are 廃止) are used across all docs.
+- `GLOSSARY.md` — domain terms; use them in code, docs and UI text. `docs/adr/` records why the model is shaped this way.
+- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-017` (F-005 and F-008 are 廃止) are used across all docs.
 - `docs/basic_design.md` — system layout, screens, DB overview (ER diagram only), external API integration.
 - `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API, alternatives considered, test plan, open issues (section 9).
 
@@ -24,9 +25,9 @@ Ask the user before adding any other gem or npm package.
 
 ## Rules (Do NOT violate)
 
-- LLM / Embedding API keys stay in the backend only. Never send them to the frontend, and never hardcode them.
+- The LLM API key stays in the backend only. Never send them to the frontend, and never hardcode them.
 - Do not follow the tech stack in `README.md`; use the design docs.
-- Do not implement the 学習マップ (map view) or the cross-notebook-link UI before its open issues (`docs/design_doc.md` section 9) are settled with the user.
+- Before implementing anything listed in `docs/design_doc.md` section 9 (open issues), settle it with the user.
 
 ---
 
