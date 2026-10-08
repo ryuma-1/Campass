@@ -3,15 +3,16 @@
 * **ステータス**: Draft
 * **著者**: 池田 琉俊
 * **作成日**: 2026/07/01
-* **要件定義書**: `ReqDef.md`（v1.3.0 / 2026/10/06）
+* **要件定義書**: `ReqDef.md`（v1.4.0 / 2026/10/08）
+* **用語集**: `GLOSSARY.md`（用語は用語集に従う）
 
 ---
 
 ## 1. 目的（Goal）
 
-本システムの目的は，独学者が「次に何を学べばいいかわからない」「基礎学習の先が見えず挫折する」という課題を解消することである．LLM がユーザーの学習ゴールから前提知識の依存関係をグラフ構造として計算し，そのグラフを (a) ノートブックの依存関係そのものを地図のように俯瞰できる「学習マップ」として動的に提示し，(b) 学習マップ上では「コンパス」が学習者の現在地から次に学べるノードを指し示す状態を実現する．「地図を広げ，コンパスで進む方向を確かめながら学ぶ」というのが本アプリ（Campass）のコンセプトである．加えて，(c) 他のノートブックに強く関連するノードが見つかった場合は，それをユーザーに提案し，ノートブックを横断したつながりを本人の意思で発見・接続できる状態も目指す．
+本システムの目的は，独学者が「次に何を学べばいいかわからない」「基礎学習の先が見えず挫折する」という課題を解消することである．LLM がユーザーの学習ゴールから学ぶべき内容とその順序をグラフ構造として計算し，そのグラフを (a) ゴールごとの「マップ」として地図のように俯瞰できる形で動的に提示し，(b) マップ上では「コンパス」が学習者の現在地から次に学べるノードを指し示す状態を実現する．「地図を広げ，コンパスで進む方向を確かめながら学ぶ」というのが本アプリ（Campass）のコンセプトである．加えて，(c) 複数のマップに同じ内容が出てくる場合はノードを共有し（マップ間ノード），他のマップで学んだことが今のマップでも土台になっている状態を目指す．
 
-技術的な観点では，(1) LLM によるシラバス（グラフ構造）の構造化データ生成，(2) 単一ノートブックのグラフ構造を学習マップとして提示しつつ，進捗から現在地と次に学べるノードを導出するロジック，(3) 他ノートブックとの関連ノードを検出し，ユーザーへの提案・承認を経て接続として記録するデータモデル，の3点を無理なく成立させる設計を確立することが本 Design Doc のスコープである．
+技術的な観点では，(1) LLM によるマップ（グラフ構造）の構造化データ生成と既存ノードの再利用，(2) マップのグラフをそのまま提示しつつ，進捗から現在地と次に学べるノードを導出するロジック，(3) ノードの内容と進捗をマップ間で共有しながら，マップごとの位置づけ（道・重要度）を分けて持つデータモデル，の3点を無理なく成立させる設計を確立することが本 Design Doc のスコープである．
 
 ### 1.1 Non Goals
 
@@ -24,30 +25,33 @@
 
 独学者は「最終的に何ができるようになりたいか（ゴール）」は漠然と持っていても，そこに至るまでの前提知識の依存関係を自力で把握することが難しく，基礎学習の途中で「これが何に繋がるのか分からない」まま離脱してしまうケースが多い（ReqDef 2.1）．また，表面的なツールの使い方（ハウツー）の習得に偏り，背後にある原理原則の理解に到達しないまま学習が止まってしまう問題もある．
 
-これに対し，本アプリは「トップダウン逆算型ボトムアップ学習」，すなわちゴールから逆算して必要な前提知識を洗い出し，基礎から順に積み上げていく学習プロセスを LLM に計算させることで解決を図る．一方で，計算された依存関係は本質的にはグラフ（ネットワーク）構造になりやすく，そのまま提示すると学習者の認知負荷が高く「今何をすべきか」が分かりにくい．そのため，グラフ構造をそのまま学習マップとして見せつつ，ドリルダウン（F-007）で情報量を絞り，コンパス（F-013）で「次に進める場所」を示すことで認知負荷を抑えることが本システムの中核的な設計上の論点になる．なお，当初はグラフを一本道（リニア）に変換して見せる設計（旧 F-005, F-008）であったが，v0.5.0 で廃止した．
+これに対し，本アプリは「トップダウン逆算型ボトムアップ学習」，すなわちゴールから逆算して必要な前提知識を洗い出し，基礎から順に積み上げていく学習プロセスを LLM に計算させることで解決を図る．一方で，計算された依存関係は本質的にはグラフ（ネットワーク）構造になりやすく，そのまま提示すると学習者の認知負荷が高く「今何をすべきか」が分かりにくい．そのため，グラフ構造をそのままマップとして見せつつ，ドリルダウン（F-007）で情報量を絞り，コンパス（F-013）で「次に進める場所」を示すことで認知負荷を抑えることが本システムの中核的な設計上の論点になる．なお，当初はグラフを一本道（リニア）に変換して見せる設計（旧 F-005, F-008）であったが，v0.5.0 で廃止した．
 
-さらに，独学者は単一のゴールだけでなく，「AIも学びたいがデザインにも興味がある」のように複数の学習テーマを並行して抱えるケースが多い．この場合，テーマごとに学習順序だけを提示すると，学習者は依存関係全体の「構造」自体を意識する機会が乏しく，また，他のノートブックで既に学んだ内容（例：統計学の基礎）が今のノートブックにも関連していることに気づきにくい．ReqDef 5.2 では，この課題への対応として前提知識の関連性を可視化する「学習マップ」への拡張性が言及されており，本バージョンではこれを拡張性の考慮に留めず，実装スコープに含める（1章参照）．具体的には，(a) 学習マップは同一ノートブック内のグラフ構造をネットワーク図として可視化するものとし，(b) 他ノートブックとの関連は自動統合ではなく，関連の強いノードが見つかった際にユーザーへ提案し，承認した場合のみノード間リンクとして記録する，という設計方針とする．
+さらに，独学者は単一のゴールだけでなく，「AIも学びたいがデザインにも興味がある」のように複数の学習ゴールを並行して抱えるケースが多い．この場合，ゴールごとに別々のグラフを作ると，同じ内容（例：統計学の基礎）を2回学ぶことになり，他のマップで既に学んだ内容が今のマップにも効いていることに気づきにくい．そこで本バージョンでは，ノードをマップではなくユーザーの持ち物とし，マップを生成するときに既存のノードをLLMに伝えて再利用させる（ADR 0003）．再利用されたノードは複数のマップに登場し，進捗はどのマップでも共通になる．一方，そのゴールの中での位置づけ（道，メインノードかどうか，重要度）はマップごとに持つため，マップを追加しても他のマップのグラフは変わらない．なお，v0.8.0 までは「他ノートブックの似たノードを Embedding で検出して提案し，承認されたらリンクする」設計であったが，v0.9.0 で廃止した．
 
-用語定義:
+用語は `GLOSSARY.md` を正とする．本書で特に使う用語を次に示す．
 
 | 用語 | 定義 |
 | :--- | :--- |
-| シラバス | LLMが生成する，ゴールに至るまでの学習項目とその依存関係を表す構造化データ（JSON）． |
-| メインルート | ゴール到達に必須な学習ステップの集合（`route_type = main`）． |
-| サブクエスト | メインルートの理解を補強する任意（寄り道）の学習項目． |
-| ノートブック | ユーザーが学習テーマごとに保持する独立した作業スペース（ReqDef F-012）． |
-| ドリルダウン | 大枠のステップをクリックすることで内部の詳細な前提知識を展開する操作（ReqDef F-007）． |
-| 学習マップ | 同一ノートブック内のシラバスグラフ（ノード・エッジ）をそのまま可視化した俯瞰図．「地図」はコンセプト上の比喩であり，ノードは地理的な座標を持たない． |
-| 現在地 | 学習マップ上で学習者が今いる地点．学習中（`in_progress`）のノード，なければ直近に完了したノードを指す．どちらもなければ「スタート地点」（ノードなし）とする（4.2.8）． |
-| 進める方角（コンパス候補） | 必須の前提ノードがすべて完了している未完了のメインルートノード．複数存在し得る（4.2.8）． |
-| コンパス | 学習マップ上で，現在地から「進める方角」をすべて指し示すUI要素（ReqDef F-013）．`importance_score` の高い候補を強調し，どれに進むかはユーザーが選ぶ． |
-| クロスノートブックリンク | 異なるノートブックに属するノード同士が強く関連すると判定された際に，ユーザーへ提案され，承認された場合に記録されるノード間の接続．ノード自体は統合されず，別個体のまま繋がりのみが追加される． |
+| マップ | ユーザーがゴールごとに持つ独立した作業スペース．ゴールに至るノードと，その間の道からなる．「地図」は比喩であり，ノードは座標を持たない（ReqDef F-012）． |
+| ノード | 1つの学習項目．ユーザーの持ち物であり，複数のマップに登場できる． |
+| 道 | あるノードから別のノードへの，学ぶ順番を示すつながり．おすすめの順番であり，先のノードを開始できなくするものではない． |
+| メインノード | あるマップの最上位のノード．マップ画面に最初から描かれる．同じノードが，あるマップではメインノード，別のマップではサブノードになり得る． |
+| サブノード | 別のノードの内容の一部であるノード．どのマップでも同じで，ドリルダウンで見える（ReqDef F-007）． |
+| 寄り道 | メインノードから出る，ゴールとの関係は薄いが興味があれば学べるテーマ．ノードではなく進捗を持たない．選ぶとそのテーマで新しいマップを作れる（ReqDef F-006）． |
+| マップ間ノード | 2つ以上のマップに登場するノード．1つのノードなので，進捗はどのマップでも同じ（ReqDef F-015）． |
+| 元ノード | 1つのノードでは収まらないため，そこからマップを作ったノード．そのマップでゴールに着くと，元ノードの完了を提案する（ReqDef F-017）． |
+| 寄り道の出発点 | 寄り道からマップを作ったときの，寄り道が出ていたメインノード． |
+| 現在地 | あるマップで学習者が今いるノード．そのマップで最後に開始または完了したノード．なければスタート地点（ノードなし）とする（4.2.8）． |
+| 既知ノード | あるマップに登場するノードのうち，他のマップで学習中のもの，または完了しているもの．ある程度理解しているものとして扱う（4.2.8）． |
+| コンパス候補 | 道でつながる手前のノードがすべて完了または既知ノードである，未完了のメインノード．既知ノード自体は候補にしない（4.2.8）． |
+| コンパス | マップ上で，現在地からコンパス候補をすべて指し示すUI要素（ReqDef F-013）．`importance_score` の高い候補を強調し，どれに進むかはユーザーが選ぶ．候補以外のノードも開始できる． |
 
 ## 3. 概要（Overview）
 
-本システムは，React 製フロントエンド，Ruby on Rails 製バックエンド，MySQL データベース，および外部LLM API（Claude 等）から構成される Web アプリケーションである（ReqDef 6章）．ユーザーの入力はバックエンドを経由してLLM APIへ送信され，生成されたシラバスJSONはストリーミング形式で逐次フロントエンドへ返却・描画される．これにより，生成に数十秒を要する処理でもユーザーは最初の一歩をすぐに読み始めることができる（ReqDef 5.2）．
+本システムは，React 製フロントエンド，Ruby on Rails 製バックエンド，MySQL データベース，および外部LLM API（Claude 等）から構成される Web アプリケーションである（ReqDef 6章）．ユーザーの入力はバックエンドを経由してLLM APIへ送信され，生成されたマップのデータはストリーミング形式で逐次フロントエンドへ返却・描画される．これにより，生成に数十秒を要する処理でもユーザーは最初の一歩をすぐに読み始めることができる（ReqDef 5.2）．
 
-システムが扱う中心的なデータは「グラフ構造を持つシラバス」であり，これを (a) 依存関係を正しく表現できるデータ構造として永続化しつつ，(b) 学習マップ（ネットワークのまま）として提示し，(c) 進捗から現在地と進める方角（コンパス）を導出するロジックが本システムの技術的な核となる．これに加えて，(d) 他ノートブックの既存ノードと強く関連する新規ノードが生成された際に，その関連をユーザーへ提案し，承認された場合は「クロスノートブックリンク」として記録する仕組みを持つ．(d) はノードの統合を伴わず，別個体のノード同士に接続を追加するだけであるため，(b)(c) のロジック自体には影響しない．
+システムが扱う中心的なデータは「グラフ構造を持つマップ」であり，これを (a) 道を正しく表現できるデータ構造として永続化しつつ，(b) ネットワークのままマップとして提示し，(c) 進捗から現在地とコンパス候補を導出するロジックが本システムの技術的な核となる．これに加えて，(d) ノードをユーザーの持ち物としてマップ間で共有し，マップを生成するときに既存ノードを再利用させる．共有するのはノードの内容（タイトル，概要，サブノード）と進捗であり，道・メインノードかどうか・重要度はマップごとに持つため，(b)(c) は1つのマップの範囲で計算できる．
 
 ### 3.1 ハイレベルアーキテクチャ
 
@@ -56,17 +60,17 @@
 │   Frontend      │  HTTP  │   Backend             │  HTTPS │  外部LLM API         │
 │   (React)       │◄──────►│   (Ruby on Rails)     │◄──────►│  (Claude / GPT等)    │
 │                 │  SSE   │                        │  ストリーミング       │  ※オプトアウト設定必須 │
-│ ・入力フォーム    │        │ ・シラバス生成オーケストレーション│        └────────────────────┘
-│ ・学習マップUI    │        │ ・プロンプトテンプレート管理  │
-│ ・ドリルダウン表示 │        │ ・ノートブック/進捗の永続化  │
+│ ・入力フォーム    │        │ ・マップ生成オーケストレーション│        └────────────────────┘
+│ ・マップUI       │        │ ・プロンプトテンプレート管理  │
+│ ・ドリルダウン表示 │        │ ・マップ/ノード/進捗の永続化 │
 └────────────────┘        │ ・APIキーの秘匿管理        │
                             └──────────┬─────────────┘
                                        │
                                        ▼
                             ┌──────────────────────┐
                             │   MySQL                │
-                            │ ・User / Notebook       │
-                            │ ・Syllabus (Node/Edge)  │
+                            │ ・User / Map            │
+                            │ ・Node / Path           │
                             │ ・Progress / Assessment │
                             └──────────────────────┘
 ```
@@ -74,46 +78,48 @@
 * フロントエンド（React）とバックエンド（Rails）は REST API + ストリーミング（Server-Sent Events）で通信する（4.3.1）．
 * バックエンドは外部LLM APIキーを一元管理し，フロントエンドへは絶対に露出させない（ReqDef 5.3）．
 * CLI（Go，ReqDef F-014）はフロントエンドと同列のクライアントとして同じ REST API + SSE を利用する．業務ロジックと外部APIキーは持たない（4.5）．
-* MySQL はグラフ構造（ノード・エッジ）を表現可能なリレーショナル設計とし，学習マップ（単一ノートブック内のネットワーク表示）およびクロスノートブックリンク（ReqDef 5.2 の拡張性言及に対応）を見据える．
+* MySQL はグラフ構造（ノード・道）を表現可能なリレーショナル設計とし，マップ（ネットワーク表示）と，マップ間でのノードの共有（ReqDef F-015）を表現する．
 
 ### 3.2 主要ユースケースフロー
 
 ReqDef 4.2 のタイムライン形式の進行制御に対応する，代表的な一連の処理フローを示す．
 
-1. ユーザーが学びたいことを自由入力する（F-001）．
+1. ユーザーが学びたいことを自由入力する（F-001）．寄り道から新しいマップを作る場合は，寄り道のテーマが入力済みになる（F-006）．
 2. バックエンドがLLMに「入力が具体的なゴールとして十分か」を判定させ，曖昧であれば3件のゴール候補を生成する（F-002）．ユーザーは候補から選択，または自由入力のまま次へ進む．
 3. ユーザーが学習の深さ（ライト／スタンダード／ディープ）を選択する（F-003）．この選択値はLLMへのプロンプト制約（`max_depth` 等）としてそのまま渡される．
-4. 決定したゴールに基づき，3〜5問の前提知識アセスメントを実施する（F-004）．回答結果は「既習スキップ対象ノード」としてシラバス生成プロンプトに反映される．
-5. バックエンドがLLMへシラバス生成をリクエストし，ストリーミングでシラバスJSON（グラフ構造）を受信しながら，逐次DBへ永続化する（F-011）．
-6. 受信したノードを，フロントエンドが学習マップ上に順次描画する（F-011）．
-7. ユーザーは学習マップ上でコンパスが示す「進める方角」から次に学ぶノードを選び（F-013，4.2.8），各地点をドリルダウンして前提知識を展開したり（F-007），マイルストーンで成果物提示を行ったりしながら学習を進める（F-009, F-010）．進捗を更新すると，現在地と進める方角が再計算される．
-8. シラバス生成中（ステップ5）に新規ノードが確定するたび，バックエンドは同一ユーザーの他ノートブックの既存ノードとの関連度をEmbedding類似度で計算する．強い関連が見つかった場合，「他のノートブック『◯◯』の『△△』と関連がありそうです」という提案をユーザーに提示する．
-9. ユーザーが提案を承認すると，2つのノードの間にクロスノートブックリンクが記録される．学習マップ上では，このリンクを通じて他ノートブックのノードへの参照が示される（ノード自体は統合されない）．承認しない場合はそのまま提案を無視・却下でき，データには反映されない．
-
-> **補足**: クロスノートブックリンクの提案（ステップ8〜9）は生成フローの中で発生する非同期的な追加ステップであり，ユーザーが応答しなくても学習マップの表示自体はブロックされない．
+4. 決定したゴールに基づき，3〜5問の前提知識アセスメントを実施する（F-004）．回答結果は「既習スキップ対象」としてマップ生成プロンプトに反映される．
+5. 最後の回答を送るとマップ画面に移り，バックエンドがLLMへマップ生成をリクエストする．プロンプトにはユーザーの既存ノードの一覧を含め，同じ内容は新しく作らずに再利用させる（F-011，F-015）．ストリーミングでノードを受信しながら，逐次DBへ永続化する．
+6. 受信したノードを，フロントエンドがマップ上に順次描画する．再利用された既知ノードは最初から埋まった状態で現れ，そこから新しいノードへ道がのびる（F-009）．
+7. 生成が終わるとコンパスが現れる．ユーザーはコンパス候補から次に学ぶノードを選び（F-013，4.2.8），ノードをドリルダウンしてサブノードを見たり（F-007），マイルストーンで成果物提示を行ったりしながら学習を進める（F-010）．進捗を更新すると，そのマップの現在地とコンパス候補が再計算される．
+8. 興味を持った寄り道や，1つのノードでは収まらないノードからは，新しいマップを作れる（F-006，F-017）．作ったマップには，元のマップのノードや寄り道の入口から移動できる．
 
 ## 4. 詳細設計（Detailed Design）
 
 ### 4.1 データ構造設計
 
-シラバスは本質的にグラフ（有向非巡回グラフ）であり，学習マップはこれをそのまま提示する．そのため，DB上は **ノード・エッジ方式** のグラフ構造として保持し，(a) 学習マップは同一ノートブック内の `syllabus_nodes` / `syllabus_edges` をそのまま描画する．並び順のような派生データは保持せず，現在地とコンパスは進捗（`progress_statuses`）とエッジから都度導出する（4.2.8）．一方，(b) 他ノートブックのノードとの関連は，ノードを統合せず「提案→承認」を経て記録される接続として `cross_notebook_links` という別テーブルで管理する．なお，関連度の判定アルゴリズム自体は9章のオープンな論点として引き続き検証対象である．
+マップは本質的にグラフ（有向非巡回グラフ）であり，マップ画面はこれをそのまま提示する．そのため，DB上は **ノード・道方式** のグラフ構造として保持する．ノードはユーザーの持ち物であり（ADR 0003），次のように「内容」と「マップごとの位置づけ」を分けて持つ．
+
+* **共有するもの**: ノードの内容（`nodes`），サブノードの関係（`sub_nodes`）と，同じノードの中のサブノード間の道（`sub_node_paths`），進捗（`progress_statuses`）．
+* **マップごとに持つもの**: どのノードがメインノードか（`map_nodes`），その重要度，メインノード間の道（`map_paths`），寄り道（`detours`），現在地（`maps.current_node_id`）．
+
+並び順のような派生データは保持せず，コンパス候補は進捗と道から都度導出する（4.2.8）．現在地だけはマップごとに保存する．
 
 #### 4.1.1 ER図（論理構成）
 
 ```
-users ──1:N── notebooks ──1:N── syllabus_nodes ──1:N── syllabus_edges (from_node_id)
-                    │                   │  ▲                    │
-                    │                   │  │ self (parent)      │ (to_node_id も syllabus_nodes を参照)
-                    │                   │  └────────────────────┘
-                    │                   ├──1:1── progress_statuses
-                    │                   ├──1:N── assessment_answers（target_node_id 経由，NULLABLE）
-                    │                   └──N:N── syllabus_nodes（他ノートブック，cross_notebook_links 経由）
-                    └──1:N── assessment_questions ──1:1── assessment_answers
+users ──1:N── maps ──1:N── map_nodes ──N:1── nodes ──1:1── progress_statuses
+               │  │  │          └──1:0..1── detours ──0..1:1── maps（寄り道から作ったマップ）
+               │  │  └──1:N── map_paths（同じマップのメインノード間の道）
+               │  ├── origin_node_id ──N:1── nodes（元ノード）
+               │  └── current_node_id ──N:1── nodes（現在地）
+               └──1:N── assessment_questions ──1:1── assessment_answers
+users ──1:N── nodes ──1:N── sub_nodes（ノード → サブノード）
+                     └──1:N── sub_node_paths（同じノードの中のサブノード間の道）
 ```
 
-* `syllabus_edges` は `syllabus_nodes` に対して `from_node_id` / `to_node_id` の2本の外部キーを持つ自己参照的な多対多の中間テーブルであり，DAG（有向非巡回グラフ）を表現する．**同一ノートブック内のノード間のみ**を結び，学習マップはこのグラフをそのまま描画する．
-* `syllabus_nodes.parent_node_id` は同テーブルへの自己参照であり，ドリルダウン（F-007）の親子階層を表す．これは「前提関係（依存）」を表す `syllabus_edges` とは別軸の関係である点に注意する（親子＝階層の入れ子，エッジ＝学習順序の依存）．
-* `cross_notebook_links` は `syllabus_edges` とは異なり，**異なるノートブックに属するノード間**のみを結ぶテーブルであり，ユーザーの提案承認を経て初めてレコードが作成される（4.2.7）．
+* `map_nodes` は「あるマップに置かれたメインノード」を表す．サブノードは `map_nodes` に置かず，`sub_nodes` によってどのマップでも同じものが見える．あるマップで `map_nodes` にあるノードはそのマップのメインノードであり，そうでなくサブノードとして見えるノードはそのマップのサブノードである．
+* `map_paths` は同じマップのメインノード間の道であり，マップごとに非巡回であることを生成時に検証する（4.2.4）．道はマップごとに持つため，同じノードでもマップによって道が異なってよい．
+* `sub_nodes` と `sub_node_paths` はノードの内容の一部としてマップ間で共有する．あとから作ったマップがサブノードを追加すると（4.2.4），元のマップでもドリルダウンで見えるようになる．
 * アセスメント回答が既習判定に紐づく場合は，`assessment_answers.target_node_id` で対象ノードを参照する．
 
 #### 4.1.2 テーブル定義
@@ -142,80 +148,106 @@ users ──1:N── notebooks ──1:N── syllabus_nodes ──1:N── s
 | `expires_at` | DATETIME | NOT NULL | 有効期限（期間の長さは 4.5.7 で未決） |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
-**`notebooks`**
+**`maps`**
 
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
 | `user_id` | BIGINT UNSIGNED | FK → `users.id`, NOT NULL, INDEX | |
-| `title` | VARCHAR(255) | NOT NULL | ノートブック表示名（LLM提案 or ユーザー編集） |
+| `title` | VARCHAR(255) | NOT NULL | マップの表示名（LLM提案 or ユーザー編集） |
 | `goal_text` | TEXT | NOT NULL | ユーザーが入力・確定した学習ゴールの原文 |
-| `difficulty` | ENUM('light','standard','deep') | NOT NULL | F-003 の難易度選択値 |
-| `status` | ENUM('generating','ready','failed') | NOT NULL, DEFAULT 'generating' | シラバス生成の進行状態 |
+| `difficulty` | ENUM('light','standard','deep') | NOT NULL | F-003 の難易度選択値．生成のやり直しと，後のフェーズの F-016 で深さの目安に使う |
+| `status` | ENUM('generating','ready','failed') | NOT NULL, DEFAULT 'generating' | マップ生成の進行状態 |
+| `current_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NULLABLE, ON DELETE SET NULL | 現在地．このマップで最後に開始または完了したメインノード．NULL はスタート地点（4.2.8） |
+| `origin_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NULLABLE, UNIQUE, ON DELETE SET NULL | 元ノード（F-017）．UNIQUE により，1つのノードから作れるマップは1つだけ |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
-**`syllabus_nodes`**
+寄り道から作ったマップは `detours.spawned_map_id` から参照する．`origin_node_id` を持つマップが同時に寄り道から作ったマップになることはない（アプリケーション層で検証する）．
+
+**`nodes`**（ノードの内容．ユーザーの持ち物）
 
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
-| `notebook_id` | BIGINT UNSIGNED | FK → `notebooks.id`, NOT NULL, INDEX | |
-| `parent_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NULLABLE, INDEX | ドリルダウンの親ノード（F-007） |
+| `user_id` | BIGINT UNSIGNED | FK → `users.id`, NOT NULL, INDEX | ノードはユーザー単位で共有する（他ユーザーとは共有しない） |
 | `title` | VARCHAR(255) | NOT NULL | |
 | `summary` | TEXT | NOT NULL | AIによる概要文（F-011） |
-| `route_type` | ENUM('main','sub') | NOT NULL | メインルート／サブクエスト（F-006） |
-| `importance_score` | FLOAT | NOT NULL, DEFAULT 0 | LLMが付与するゴール到達への重要度（0〜1）．コンパス候補の強調順に使う（4.2.8） |
-| `depth_level` | INT UNSIGNED | NOT NULL, DEFAULT 0 | ドリルダウンの階層深さ（0が最上位） |
-| `related_main_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NULLABLE | `route_type='sub'` の場合の紐付け先メインノード |
-| `embedding` | JSON | NULLABLE | クロスノートブックリンク検出用の埋め込みベクトル（4.2.7で保存，`route_type='main'` のみ） |
-| `skip_recommended` | BOOLEAN | NOT NULL, DEFAULT FALSE | アセスメント結果による既習スキップ推奨フラグ（F-004） |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
-**`cross_notebook_links`**（他ノートブックとの関連提案・接続）
+**`map_nodes`**（マップに置かれたメインノード）
 
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
-| `user_id` | BIGINT UNSIGNED | FK → `users.id`, NOT NULL, INDEX | リンクはユーザー単位（他ユーザーのノートブックとは接続しない） |
-| `source_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NOT NULL, INDEX | 提案の起点となった新規ノード（4.2.7で生成直後に検出） |
-| `target_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NOT NULL, INDEX | 関連が検出された既存ノード（別ノートブック） |
-| `similarity_score` | FLOAT | NOT NULL | 検出時のEmbedding類似度（4.2.7） |
-| `status` | ENUM('proposed','accepted','rejected') | NOT NULL, DEFAULT 'proposed' | ユーザーの応答状態 |
-| `responded_at` | DATETIME | NULLABLE | ユーザーが承認／却下した時刻 |
+| `map_id` | BIGINT UNSIGNED | FK → `maps.id`, NOT NULL, ON DELETE CASCADE | |
+| `node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | |
+| `importance_score` | FLOAT | NOT NULL, DEFAULT 0 | LLMが付与する，このゴールの中での重要度（0〜1）．コンパス候補の強調順に使う（4.2.8） |
+| `skip_recommended` | BOOLEAN | NOT NULL, DEFAULT FALSE | このマップのアセスメント結果による既習スキップ推奨フラグ（F-004） |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
-| UNIQUE制約 | | `(source_node_id, target_node_id)` | 同一ペアへの重複提案を禁止 |
+| UNIQUE制約 | | `(map_id, node_id)` | |
 
-`cross_notebook_links` は `syllabus_edges` と異なり，(1) 異なるノートブックのノード間のみを結ぶ，(2) `status` によってユーザーの意思（提案中／承認済／却下済）を保持する，という2点が特徴である．承認された（`status='accepted'`）リンクのみが学習マップ上で「他ノートブックへの接続」として表示され，`proposed` のままのリンクはユーザーへの提案表示にのみ使われる．ノード自体の統合は一切行わない．
-
-**`syllabus_edges`**
+**`map_paths`**（マップごとのメインノード間の道）
 
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
-| `from_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NOT NULL, INDEX | 前提ノード |
-| `to_node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NOT NULL, INDEX | 後続ノード |
-| `relation_type` | ENUM('required','supplementary') | NOT NULL, DEFAULT 'required' | 必須前提／補足 |
-| UNIQUE制約 | | `(from_node_id, to_node_id)` | 同一方向の重複エッジを禁止 |
+| `map_id` | BIGINT UNSIGNED | FK → `maps.id`, NOT NULL, ON DELETE CASCADE | |
+| `from_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | 道の元（先に学ぶノード）．同じマップの `map_nodes` にあること |
+| `to_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | 道の先．同じマップの `map_nodes` にあること |
+| UNIQUE制約 | | `(map_id, from_node_id, to_node_id)` | 同一方向の重複を禁止 |
+
+**`sub_nodes`**（サブノードの関係．マップ間で共有）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | サブノードを持つノード |
+| `sub_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | サブノード |
+| UNIQUE制約 | | `(node_id, sub_node_id)` | |
+
+**`sub_node_paths`**（同じノードの中のサブノード間の道．マップ間で共有）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, INDEX | どのノードの中の道か |
+| `from_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL | 道の元．`node_id` のサブノードであること |
+| `to_node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL | 道の先．`node_id` のサブノードであること |
+| UNIQUE制約 | | `(node_id, from_node_id, to_node_id)` | |
+
+**`detours`**（寄り道）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `map_node_id` | BIGINT UNSIGNED | FK → `map_nodes.id`, NOT NULL, UNIQUE, ON DELETE CASCADE | 寄り道が出ているメインノード．UNIQUE により1つのメインノードにつき最大1つ（F-006） |
+| `title` | VARCHAR(255) | NOT NULL | 寄り道のテーマ |
+| `reason` | TEXT | NOT NULL | ゴールとの関係（ノードの詳細に表示する） |
+| `spawned_map_id` | BIGINT UNSIGNED | FK → `maps.id`, NULLABLE, UNIQUE, ON DELETE SET NULL | この寄り道から作ったマップ．NULL の間はノードの詳細にだけ表示し，作成後はマップ画面に行き止まりの入口として描く |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
 **`assessment_questions` / `assessment_answers`**
 
 | テーブル | 主なカラム | 説明 |
 | :--- | :--- | :--- |
-| `assessment_questions` | `id`, `notebook_id`, `question_text`, `choices`（JSON） | F-004 で生成される3〜5問の質問 |
+| `assessment_questions` | `id`, `map_id`, `question_text`, `choices`（JSON） | F-004 で生成される3〜5問の質問 |
 | `assessment_answers` | `id`, `question_id`, `answer_value`, `target_node_id`（NULLABLE） | 回答結果．`target_node_id` は回答が既習判定に紐づく場合のノード参照 |
 
-**`progress_statuses`**
+**`progress_statuses`**（進捗．マップ間で共有）
 
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
-| `node_id` | BIGINT UNSIGNED | FK → `syllabus_nodes.id`, NOT NULL, UNIQUE | 1ノード1レコード |
+| `node_id` | BIGINT UNSIGNED | FK → `nodes.id`, NOT NULL, UNIQUE | 1ノード1レコード．どのマップでも同じ進捗 |
 | `status` | ENUM('not_started','in_progress','completed') | NOT NULL, DEFAULT 'not_started' | |
+| `started_map_id` | BIGINT UNSIGNED | FK → `maps.id`, NULLABLE, ON DELETE SET NULL | 学習中にしたマップ．既知ノードの判定に使う（4.2.8）．NULL の学習中ノードは，どのマップでも「そのマップで始めた」ものとして扱う |
 | `milestone_artifact_url` | VARCHAR(2048) | NULLABLE | F-010 のマイルストーン成果物リンク |
-| `completed_at` | DATETIME | NULLABLE | 現在地の決定に使う（4.2.8） |
-| `created_at` / `updated_at` | DATETIME | NOT NULL | `updated_at` は学習中ノードが複数ある場合の現在地の決定に使う（4.2.8） |
+| `completed_at` | DATETIME | NULLABLE | |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
-`syllabus_nodes` と `syllabus_edges` は同一ノートブック内で完結するグラフを表現し，学習マップ（そのままのグラフ描画）はこの2テーブルのみから導出でき，コンパスはこれに `progress_statuses` を加えて導出できる．他ノートブックとの関連は `cross_notebook_links` として明確に別テーブルに分離しており，ノードの同一性を仮定しないため，学習マップの実装が単一ノートブックの範囲を超えて複雑化することを防いでいる．なお `syllabus_edges` はDBレベルでは循環参照を防止できないため，4.2.4 のシラバス生成時バリデーションで DAG 性（非巡回性）を保証する運用とする．
+* `map_paths`，`sub_node_paths`，`sub_nodes` はDBレベルでは循環を防止できないため，4.2.4 の生成時バリデーションで非巡回性を保証する．
+* マップを削除すると，`map_nodes`，`map_paths`，`detours` は連鎖削除される．ノードは，どのマップの `map_nodes` にも，どのノードの `sub_nodes` にも残らなくなった場合に，アプリケーション層で削除する（サブノードも同じ規則で辿って削除する）．他のマップに登場するノードとその進捗は残す．
+* マップを削除する前に，そのマップで学習中にしたノード（`started_map_id` がそのマップ）を利用者に知らせる（4.3.1 の `GET /api/maps/:id/deletion_preview`）．削除後，それらのノードは他のマップで「そのマップで始めた」学習中ノードとして扱われ，既知ノードにはならない．
 
 ### 4.2 主要機能のアルゴリズム設計
 
@@ -241,30 +273,53 @@ function resolveGoal(rawInput, retryCount = 0):
 
 #### 4.2.2 難易度選択によるプロンプト制約（F-003）
 
-「ライト／スタンダード／ディープ」の選択値を，シラバス生成プロンプトの `max_depth`（ドリルダウン階層数），`node_count_target`（メインルートのノード数目安），`sub_quest_ratio`（サブクエストの生成比率）という3つのパラメータにマッピングする．マッピング値はソースコードから切り離し，4.3.2 で述べるプロンプトテンプレート管理の対象とする．
+「ライト／スタンダード／ディープ」の選択値を，マップ生成プロンプトの `max_depth`（ドリルダウン階層数）と `node_count_target`（メインノード数の目安）という2つのパラメータにマッピングする．マッピング値はソースコードから切り離し，4.3.2 で述べるプロンプトテンプレート管理の対象とする．寄り道は難易度に関係なく，1つのメインノードにつき最大1つ（勧める価値がある場合のみ）とする（F-006）．
 
 初期値の目安（プロンプトテンプレート側の設定ファイルで管理する想定値）:
 
-| 難易度 | `max_depth` | `node_count_target`（メインルート） | `sub_quest_ratio` |
-| :--- | :--- | :--- | :--- |
-| ライト | 1（ドリルダウンなし相当） | 5〜8 | 0.1（ほぼ寄り道なし） |
-| スタンダード | 2 | 8〜15 | 0.3 |
-| ディープ | 3 | 15〜25 | 0.5（背景理論まで深掘り） |
+| 難易度 | `max_depth` | `node_count_target`（メインノード） |
+| :--- | :--- | :--- |
+| ライト | 1（ドリルダウンなし相当） | 5〜8 |
+| スタンダード | 2 | 8〜15 |
+| ディープ | 3 | 15〜25 |
 
 ```
 function buildGenerationParams(difficulty):
     config = loadPromptConfig("difficulty_mapping")  # 外部設定ファイルから取得
     return config[difficulty]
-    # => { max_depth, node_count_target, sub_quest_ratio }
+    # => { max_depth, node_count_target }
 ```
 
 #### 4.2.3 前提知識アセスメント（F-004）
 
-決定したゴールに基づき，LLMに3〜5問の確認質問（多肢選択または自己申告形式）を生成させる．回答結果は `assessment_answers` に保存し，シラバス生成プロンプトへ「ユーザーが既に習得済みの前提知識」として渡す．LLMはこれを踏まえて該当ノードを生成しない，または `skip_recommended: true` フラグ付きで生成する．
+決定したゴールに基づき，LLMに3〜5問の確認質問（多肢選択または自己申告形式）を生成させる．回答結果は `assessment_answers` に保存し，マップ生成プロンプトへ「ユーザーが既に習得済みの前提知識」として渡す．LLMはこれを踏まえて該当ノードを生成しない，または `skip_recommended: true` フラグ付きで生成する（`map_nodes.skip_recommended`）．
 
-#### 4.2.4 シラバスJSON動的生成（F-011）
+#### 4.2.4 マップの動的生成（F-011，F-015）
 
-LLMへは，ゴール・難易度パラメータ・アセスメント結果を含むプロンプトを送信し，ノード（`id`, `title`, `summary`, `prerequisites: [id]`, `route_type`, `importance_score`）の配列をJSON形式で返させる．出力はJSON Schema による構造化出力（またはツール呼び出し形式）を用いて形式を強制し，パース失敗時のリトライ戦略（最大2回）をバックエンド側に実装する．
+LLMへは，ゴール・難易度パラメータ・アセスメント結果に加え，**ユーザーの既存ノードの一覧**（ID，タイトル，そのノードのサブノードの ID）を含むプロンプトを送信する．LLMは同じ内容のノードを新しく作らず，既存ノードの ID を指定して再利用する（ADR 0003）．既存ノードは完了しているかどうかに関係なく再利用の対象とする．出力はJSON Schema による構造化出力（またはツール呼び出し形式）で形式を強制し，パース失敗時のリトライ（最大2回）をバックエンド側に実装する．
+
+LLM の出力は，メインノードの配列とし，各メインノードは次の項目を持つ．
+
+| 項目 | 説明 |
+| :--- | :--- |
+| `ref` | 出力内での仮 ID．道やサブノードの参照に使う |
+| `existing_node_id` | 既存ノードを再利用する場合のノード ID．新規の場合は `null` |
+| `title` / `summary` | 新規ノードの場合のみ使う |
+| `from` | このマップでこのノードへ道がのびてくるメインノードの `ref` の配列 |
+| `importance_score` | このゴールの中での重要度（0〜1） |
+| `skip_recommended` | アセスメント結果による既習スキップ推奨（4.2.3） |
+| `sub_nodes` | サブノードの配列．各要素はメインノードと同じく `ref`，`existing_node_id`，`title`，`summary`，`from`（同じノードの中のサブノードの `ref`），`sub_nodes` を持つ（`max_depth` まで入れ子） |
+| `detour` | 寄り道（`title`，`reason`）．勧める価値がない場合は `null`（F-006） |
+
+* **再利用したノードのサブノード**: 再利用したノードの既存のサブノードは，そのまま引き継ぐ．LLM は不足していると判断した場合，新しいサブノードを追加してよい．追加したサブノードは `sub_nodes` に保存され，そのノードが登場する他のマップでもドリルダウンで見えるようになる（ADR 0003）．既存のサブノードと重複しないよう，再利用候補のノードについてはサブノードも一覧に含めて渡す．
+* **元ノードからのマップ（F-017）**: 元ノード X からマップを作る場合，X の既存のサブノードを優先して再利用させる．生成したメインノードのうち X のサブノードでないものは，X のサブノードとしても `sub_nodes` に追加する．これにより「元ノードから作ったマップのノードは，元ノードのサブノード」という関係（GLOSSARY.md）がデータ上も成り立つ．
+* **サブノードと道の区別**: 「あるノードを，そのノード自身のサブノードへ道で結ぶ」ような出力は，内容の一部を順番の関係として書いた誤りであるため，プロンプトで避けるよう指示する．ただし検証エラーにはしない（誤っても，完了をユーザーが決めるため学習は止まらない．4.2.8）．
+* **バリデーション**: 次のいずれかに当てはまる出力は検証エラーとし，再生成させる（最大2回）．該当する道やサブノードを黙って除去・修正しない．
+  * このマップの `map_paths` が循環する．
+  * あるノードの中の `sub_node_paths` が循環する．
+  * `sub_nodes` が循環する（例：X が Y のサブノードであり，Y が X のサブノードでもある）．既存ノードの再利用によって起こり得る．
+  * 未知の `ref` や，ユーザーの持ち物でない `existing_node_id` を参照している．
+* **プロンプト長**: 既存ノードの一覧は，まずユーザーの全ノードを渡す．ノード数が増えてプロンプトが長くなりすぎた場合の絞り込み方法は 9章の論点とする．
 
 #### 4.2.5 リニア（一本道）変換アルゴリズム（廃止）
 
@@ -272,100 +327,76 @@ v0.5.0 で一本道ビューを廃止したため，本アルゴリズム（ト�
 
 #### 4.2.6 ドリルダウン展開（F-007）
 
-学習マップの初期表示では `depth_level = 0` のノードのみを描画し，ユーザーが地点を選んだ際に `parent_node_id` が一致する子ノード群とその間のエッジを `GET /api/nodes/:id/children`（4.3.1）で取得し，その地点の内部として展開する．子ノード群も学習マップと同じくグラフのまま表示する．
+マップの初期表示ではメインノード（`map_nodes`）のみを描画し，ユーザーがノードを選んだ際に，そのサブノード群とその間の道を `GET /api/nodes/:id/sub_nodes`（4.3.1）で取得し，そのノードの内部として展開する．サブノード群もマップと同じくグラフのまま表示する．サブノードはマップ間で共有されるため，どのマップから開いても同じ結果になる．元ノード（そこから作ったマップがあるノード）を選んだ場合は，ドリルダウンの代わりにそのマップへ移動する（F-017）．
 
-#### 4.2.7 クロスノートブックリンク：即時提案処理
+#### 4.2.7 クロスノートブックリンク：即時提案処理（廃止）
 
-シラバス生成（4.2.4）のストリーミング中，`route_type = main` の各ノードが1件確定するたびに，同一ユーザーの他ノートブックに属する既存ノードとの関連度を即時に検出する．関連度の判定には埋め込みベクトルによる類似度検索を用いるが，今回の想定規模（ReqDef 5.2：通常100 DAU／ピーク1,000 DAU）ではユーザーあたりのノード数も小さいため，専用のベクトルDB／ベクトルインデックスは導入せず，埋め込み計算のみ外部Embedding APIに委ね，類似度計算自体はアプリケーション層でのコサイン類似度計算で済ませる（5章の代替案として詳細化）．統合ではなく「提案」に留めるため，本処理はノードや既存データを変更せず，`cross_notebook_links` に `status='proposed'` のレコードを追加するのみである．
-
-```
-function proposeCrossNotebookLinks(newNode, currentNotebookId, userId):
-    # newNode: 生成直後の syllabus_node（route_type = main）
-    embedding = callEmbeddingAPI(newNode.title + "\n" + newNode.summary)
-    saveEmbedding(newNode, embedding)  # syllabus_nodes.embedding に保存（後続ノードとの比較にも再利用）
-
-    # 同一ユーザーの「他ノートブック」に属する既存ノードのみを比較対象にする
-    candidateNodes = loadMainNodesExcludingNotebook(userId, excludeNotebookId=currentNotebookId)
-
-    SIMILARITY_THRESHOLD = 0.80  # 初期値。提案なので統合より緩めに設定（5章・9章参照）
-
-    for candidate in candidateNodes:
-        score = cosineSimilarity(embedding, candidate.embedding)
-        if score >= SIMILARITY_THRESHOLD:
-            createCrossNotebookLink(
-                userId=userId,
-                sourceNodeId=newNode.id,
-                targetNodeId=candidate.id,
-                similarityScore=score,
-                status="proposed"
-            )
-            # 1つのノードに対して複数の提案が発生してもよい（上限は運用で調整、9章参照）
-```
-
-* ユーザーが提案を確認し `PATCH /api/cross_notebook_links/:id`（4.3.1）で承認すると `status` が `accepted` に更新され，学習マップ上で他ノートブックへの接続として表示される．却下すると `rejected` となり，以後同じペアが再提案されることはない（UNIQUE制約により）．
-* 類似度の閾値（`SIMILARITY_THRESHOLD`）は初期値の仮置きであり，実データでの検証が必要（9章のオープンな論点）．統合ではなく提案であるため，4.2.7時点では「誤提案（的外れな提案でユーザーを煩わせる）」の方が「過小提案（気づきの機会を逃す）」より実害が大きいと判断し，閾値は保守的（高め）に設定する方針としている．
-* サブクエスト（`route_type = sub`）は提案の対象外とし，メインルートのノードのみを比較対象とする．この方針は9章の議論と合わせて再検討の余地がある．
+v0.9.0 でノードをマップ間で共有する方式（4.2.4，ADR 0003）に変えたため，Embedding 類似度による関連ノードの検出と提案・承認の処理は廃止した．`cross_notebook_links` テーブルとノードの `embedding` も削除した．
 
 #### 4.2.8 現在地とコンパスの決定（F-013）
 
-コンパスは「学習マップ上の現在地から，今進める方角（次に学べるノード）をすべて指す」ものであり，順序情報や座標は持たず，`syllabus_edges` と `progress_statuses` から都度導出する．対象は `depth_level = 0` のメインルートノードとする．
+コンパスは「マップ上の現在地から，今進める場所（コンパス候補）をすべて指す」ものであり，順序情報や座標は持たない．コンパス候補は，そのマップの `map_paths` と共有の `progress_statuses` から都度導出する．対象はそのマップのメインノード（`map_nodes`）とする．現在地だけは `maps.current_node_id` に保存する．
 
 ```
-function resolveCompass(notebookId):
-    nodes = loadMainNodes(notebookId, depthLevel=0)
+function resolveCompass(mapId):
+    map   = loadMap(mapId)
+    nodes = loadMainNodes(mapId)  # map_nodes
 
-    # 現在地: 学習中（複数なら最も最近更新したもの）→ 直近に完了したもの → スタート地点（null）
-    inProgress = nodes where node.progress.status == "in_progress"
-    completed  = nodes where node.progress.status == "completed"
-    if inProgress is not empty:
-        current = maxBy(inProgress, node.progress.updated_at)
-    else if completed is not empty:
-        current = maxBy(completed, node.progress.completed_at)
-    else:
-        current = null  # スタート地点
+    # 既知ノード: 他のマップで学習中のもの（完了済みは別に扱う）
+    # started_map_id が NULL の学習中ノードは「このマップで始めた」ものとみなす
+    knownInProgress(n) = n.progress.status == "in_progress"
+                         and n.progress.started_map_id != null
+                         and n.progress.started_map_id != mapId
+    satisfied(n) = n.progress.status == "completed" or knownInProgress(n)
 
-    # 進める方角: 必須の前提ノードがすべて完了している未完了ノード
+    # コンパス候補: 未完了で既知ノードでなく，道でつながる手前のノードがすべて満たされている
     candidates = nodes where node.progress.status != "completed"
-                     and all(prereq.progress.status == "completed"
-                             for prereq in requiredMainPrerequisites(node))
+                     and not knownInProgress(node)
+                     and all(satisfied(from) for from in pathSources(mapId, node))
 
-    # DAG であるため，未完了ノードが残っていれば候補は必ず1件以上存在する
     if all(node.progress.status == "completed" for node in nodes):
-        return { currentNodeId: current?.id, candidates: [], isGoalReached: true }
+        return { currentNodeId: map.current_node_id, candidates: [], isGoalReached: true }
 
-    # 強調表示のため importance_score の高い順，同点は生成順（id）で並べる
-    sortBy(candidates, -node.importance_score, node.id)
-    return { currentNodeId: current?.id, candidates: candidates, isGoalReached: false }
+    # 強調表示のため importance_score の高い順，同点は id 順で並べる
+    sortBy(candidates, -node.importanceScore, node.id)
+    return { currentNodeId: map.current_node_id, candidates: candidates, isGoalReached: false }
 ```
 
-* 必須の前提ノードとは，`relation_type = 'required'` のエッジで結ばれたメインルートの前提ノードを指す．`supplementary` のエッジやサブクエストの完了状態は判定に使わない．
-* 候補が複数ある場合はすべてを「進める方角」として示し，どれに進むかはユーザーが選ぶ．`importance_score` は強調表示のためだけに使い，候補の絞り込みには使わない．
-* 学習中のノード自体も未完了であるため候補に含まれる．
-* サブクエスト（`route_type = sub`）は寄り道であり，現在地にも候補にもならない．
-* 現在地・候補はバックエンドで決定し，フロントエンドでは再計算しない．進捗更新（`PATCH /api/nodes/:id/progress`）のたびに再計算し，レスポンスに最新のコンパス情報を含める．
+* **既知ノード**: あるマップに登場するノードのうち，他のマップで学習中または完了のもの．完了したノードはどのマップで完了したかに関係なく，候補にならず，道の手前としても満たしたものとして扱う．学習中のノードは，`started_map_id` が今のマップでなければ既知ノードとして候補から外し，道の手前としては満たしたものとして扱う．今のマップで学習中にしたノードは，今まさに取り組んでいるものとして候補に含める．
+* 候補が複数ある場合はすべてを示し，どれに進むかはユーザーが選ぶ．`importance_score` は強調表示のためだけに使い，候補の絞り込みには使わない．
+* **コンパスは案内であり，制限ではない**: 候補でないノードも，ユーザーが選べば開始できる．未完了のメインノードがすべて他のマップで学習中の場合など，ゴール未達でも候補が空になることがある．
+* **ゴール到達**: そのマップのメインノードがすべて完了したとき．完了はいつもユーザーが決め，システムが自動で完了にすることはない．マップに元ノードがある場合，ゴール到達時に元ノードの完了を提案する（`PATCH` のレスポンスの `origin_completion_suggestion`，4.3.1）．
+* **現在地の更新**: `PATCH /api/maps/:mapId/nodes/:nodeId/progress` で，そのマップのメインノードを開始または完了にしたとき，`maps.current_node_id` をそのノードにする．サブノードの進捗の更新や，他のマップでの更新では動かない．ノードを学習中にしたときは `progress_statuses.started_map_id` に `mapId` を記録し，未着手に戻したときは NULL に戻す．
+* サブノードの進捗も記録できるが，現在地・コンパス候補・ゴール到達の判定には使わない．
+* 現在地・候補はバックエンドで決定し，フロントエンドでは再計算しない．進捗更新のたびに再計算し，レスポンスに最新のコンパス情報を含める．
 
 ### 4.3 インタフェース設計
 
 #### 4.3.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
-REST API を基本としつつ，シラバス生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．CLI は `Authorization: Bearer <token>` ヘッダーで認証する（4.5.4）．
+REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．CLI は `Authorization: Bearer <token>` ヘッダーで認証する（4.5.4）．
 
 | エンドポイント | 概要 |
 | :--- | :--- |
-| `POST /api/auth/tokens` | メールアドレスとパスワードで認証し，CLI 用のトークンを発行する（4.5.4，新規）． |
-| `DELETE /api/auth/tokens/current` | リクエストに使ったトークンを失効させる（4.5.4，新規）． |
-| `GET /api/notebooks` | ログインユーザーのノートブック一覧を取得（F-012，新規）． |
-| `POST /api/notebooks` | ノートブック（学習テーマ）の新規作成． |
-| `POST /api/notebooks/:id/goal_suggestions` | 入力に対するゴール候補提案（F-002）． |
-| `POST /api/notebooks/:id/assessment` | 前提知識アセスメントの質問取得・回答送信（F-004）． |
-| `POST /api/notebooks/:id/syllabus` (SSE) | シラバス生成をストリーミングで開始し，ノード単位で逐次イベントを返す（F-011）．4.2.7で検出したクロスノートブックリンクの提案は，該当ノードのイベントの直後に独立したイベントとして返す．イベント形式は本節の「SSE イベント形式」を参照． |
-| `GET /api/notebooks/:id/map` | 当該ノートブックの `depth_level = 0` のシラバスグラフ（学習マップ）を，承認済みクロスノートブックリンクとコンパス情報（4.2.8）を含めて取得（新規）． |
-| `GET /api/nodes/:id/children` | ドリルダウン（F-007）．指定ノードの子ノード群とその間のエッジをグラフとして取得（新規）． |
-| `GET /api/cross_notebook_links?status=proposed` | ユーザーに提示すべき未応答の提案一覧を取得（新規）． |
-| `PATCH /api/cross_notebook_links/:id` | 提案の承認／却下（`status` を `accepted` / `rejected` に更新，新規）． |
-| `PATCH /api/nodes/:id/progress` | ノードの進捗ステータス更新（F-010）．レスポンスに更新後のコンパス情報（4.2.8）を含める． |
+| `POST /api/auth/tokens` | メールアドレスとパスワードで認証し，CLI 用のトークンを発行する（4.5.4）． |
+| `DELETE /api/auth/tokens/current` | リクエストに使ったトークンを失効させる（4.5.4）． |
+| `GET /api/maps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． |
+| `POST /api/maps` | マップの新規作成．元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）． |
+| `DELETE /api/maps/:id` | マップの削除．ノードの扱いは 4.1.2 に従う． |
+| `GET /api/maps/:id/deletion_preview` | 削除前の確認．そのマップで学習中にしたノードと，他のマップに残るノードの数を返す（4.1.2）． |
+| `POST /api/maps/:id/goal_suggestions` | 入力に対するゴール候補提案（F-002）． |
+| `POST /api/maps/:id/assessment` | 前提知識アセスメントの質問取得・回答送信（F-004）． |
+| `POST /api/maps/:id/generation` (SSE) | マップ生成をストリーミングで開始し，ノード単位で逐次イベントを返す（F-011）．イベント形式は本節の「SSE イベント形式」を参照． |
+| `GET /api/maps/:id` | マップ画面の表示内容．メインノードと道，作成済みの寄り道の入口，元ノードから作ったマップへのリンク，コンパス情報（4.2.8）を返す． |
+| `GET /api/maps/:mapId/nodes/:nodeId` | ノードの詳細．概要，進捗，このマップでの寄り道，そのノードが登場する他のマップ，元ノードとして作ったマップを返す． |
+| `GET /api/nodes/:id/sub_nodes` | ドリルダウン（F-007）．指定ノードのサブノード群とその間の道をグラフとして取得する．サブノードはマップ間で共有されるため，マップを指定しない． |
+| `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | ノードの進捗ステータス更新（F-010）．どのマップから操作したかを `mapId` で受け取り，現在地と `started_map_id` を更新する（4.2.8）．レスポンスに更新後のコンパス情報を含める． |
 
-**`POST /api/notebooks` レスポンス例**
+**`POST /api/maps` リクエスト／レスポンス例**
+
+```json
+{ "origin_node_id": null, "detour_id": null }
+```
 
 ```json
 {
@@ -374,6 +405,7 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
   "goal_text": "AIについて深く知りたい",
   "difficulty": "standard",
   "status": "generating",
+  "origin_node_id": null,
   "created_at": "2026-07-03T10:00:00+09:00"
 }
 ```
@@ -388,32 +420,33 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
 { "token": "cmp_3f9a...", "expires_at": "2027-01-04T10:00:00+09:00" }
 ```
 
-**`GET /api/notebooks` レスポンス例**
+**`GET /api/maps` レスポンス例**
 
 ```json
 {
-  "notebooks": [
-    { "id": 123, "title": "AIエンジニアリング入門", "difficulty": "standard", "status": "ready", "updated_at": "2026-07-03T10:05:00+09:00" },
-    { "id": 124, "title": "データ分析基礎", "difficulty": "light", "status": "ready", "updated_at": "2026-06-20T21:30:00+09:00" }
+  "maps": [
+    { "id": 123, "title": "AIエンジニアリング入門", "difficulty": "standard", "status": "ready", "origin": null, "detour_start": null, "updated_at": "2026-07-03T10:05:00+09:00" },
+    { "id": 140, "title": "ベイズ統計", "difficulty": "light", "status": "ready", "origin": null, "detour_start": { "map_id": 123, "map_title": "AIエンジニアリング入門", "node_id": 501, "node_title": "統計学の基礎" }, "updated_at": "2026-07-05T21:30:00+09:00" }
   ]
 }
 ```
 
-**`GET /api/notebooks/:id/map` レスポンス例**
+**`GET /api/maps/:id` レスポンス例**
 
 ```json
 {
-  "notebook_id": 123,
+  "map_id": 123,
+  "title": "AIエンジニアリング入門",
+  "origin": null,
   "graph": {
     "nodes": [
-      { "id": 501, "title": "統計学の基礎", "route_type": "main", "importance_score": 0.8, "has_children": true, "progress": "completed" },
-      { "id": 502, "title": "線形代数の基礎", "route_type": "main", "importance_score": 0.9, "has_children": false, "progress": "not_started" },
-      { "id": 503, "title": "微分の基礎", "route_type": "main", "importance_score": 0.6, "has_children": false, "progress": "not_started" },
-      { "id": 620, "title": "ベイズ統計への招待", "route_type": "sub", "related_main_node_id": 501, "importance_score": 0.3, "has_children": false, "progress": "not_started" }
+      { "id": 501, "title": "統計学の基礎", "importance_score": 0.8, "has_sub_nodes": true, "progress": "completed", "other_map_count": 1, "origin_of_map_id": null, "spawned_detour_map": { "map_id": 140, "title": "ベイズ統計" } },
+      { "id": 502, "title": "線形代数の基礎", "importance_score": 0.9, "has_sub_nodes": false, "progress": "not_started", "other_map_count": 0, "origin_of_map_id": null, "spawned_detour_map": null },
+      { "id": 503, "title": "微分の基礎", "importance_score": 0.6, "has_sub_nodes": false, "progress": "not_started", "other_map_count": 0, "origin_of_map_id": 150, "spawned_detour_map": null }
     ],
-    "edges": [
-      { "from": 501, "to": 502, "relation_type": "required" },
-      { "from": 501, "to": 503, "relation_type": "required" }
+    "paths": [
+      { "from": 501, "to": 502 },
+      { "from": 501, "to": 503 }
     ]
   },
   "compass": {
@@ -423,153 +456,167 @@ REST API を基本としつつ，シラバス生成のみストリーミング�
       { "node_id": 503, "importance_score": 0.6 }
     ],
     "is_goal_reached": false
-  },
-  "cross_notebook_links": [
-    {
-      "link_id": 8801,
-      "source_node_id": 501,
-      "target": {
-        "notebook_id": 124,
-        "notebook_title": "データ分析基礎",
-        "node_id": 733,
-        "title": "統計学の基礎"
-      },
-      "status": "accepted"
-    }
-  ]
+  }
 }
 ```
 
-**`GET /api/cross_notebook_links?status=proposed` レスポンス例**
+* `other_map_count` が1以上のノードはマップ間ノードであり，マップ画面で「他のマップと共通」の印を付ける．
+* `origin_of_map_id` は，そのノードを元ノードとして作ったマップ．選ぶとドリルダウンの代わりにそのマップへ移動する．
+* `spawned_detour_map` は，そのノードの寄り道から作ったマップ．行き止まりの入口として描く．まだマップを作っていない寄り道はここに含めず，ノードの詳細で返す．
+
+**`GET /api/maps/:mapId/nodes/:nodeId` レスポンス例**
 
 ```json
 {
-  "proposals": [
-    {
-      "link_id": 8802,
-      "similarity_score": 0.83,
-      "source": { "notebook_id": 123, "notebook_title": "AIエンジニアリング入門", "node_id": 502, "title": "線形代数の基礎" },
-      "target": { "notebook_id": 130, "notebook_title": "行動経済学入門", "node_id": 890, "title": "ベクトルと行列の基本" }
-    }
-  ]
+  "id": 501,
+  "title": "統計学の基礎",
+  "summary": "データの要約と確率の基本を学ぶ",
+  "progress": "completed",
+  "detour": { "id": 77, "title": "ベイズ統計", "reason": "確率の更新という考え方に触れる", "spawned_map_id": 140 },
+  "other_maps": [ { "map_id": 124, "title": "データ分析基礎" } ],
+  "origin_of_map_id": null
 }
 ```
 
-**`PATCH /api/cross_notebook_links/:id` リクエスト例**
+**`PATCH /api/maps/:mapId/nodes/:nodeId/progress` リクエスト／レスポンス例**
 
 ```json
-{ "status": "accepted" }
+{ "status": "completed" }
 ```
 
-**`POST /api/notebooks/:id/syllabus` SSE イベント形式**
+```json
+{
+  "node_id": 503,
+  "progress": "completed",
+  "compass": { "current_node_id": 503, "candidates": [], "is_goal_reached": true },
+  "origin_completion_suggestion": { "node_id": 900, "title": "微積分" }
+}
+```
+
+* `origin_completion_suggestion` は，この更新でマップがゴールに到達し，マップに元ノードがある場合にだけ返す（それ以外は `null`）．クライアントは元ノードの完了を提案し，完了にするかはユーザーが決める（4.2.8）．
+
+**`POST /api/maps/:id/generation` SSE イベント形式**
 
 レスポンスの `Content-Type` は `text/event-stream` とする．各イベントは `event:` 行と `data:` 行（JSON を1行で記載）からなり，空行で区切る（4.5.6 の CLI の受信方式と同じ）．CLI は `Authorization: Bearer <token>` で認証する（4.5.4）．ブラウザ側の SSE 認証はフロントエンドの認証方式（9章）が未決のため未定とする．なお，ブラウザの `EventSource` は POST やリクエストヘッダーを指定できないため，フロントエンドでは `fetch` のストリーム読み取り等が必要になる．
 
 | イベント名 | 送信タイミング | 概要 |
 | :--- | :--- | :--- |
-| `node` | ノード1件分の JSON が確定し，DB に保存した直後 | 完成した1ノード．トークン断片は送らない（4.3.2）． |
-| `link_proposal` | 4.2.7 で提案が作られた直後（該当する `node` イベントの後） | クロスノートブックリンクの提案1件．`node` には入れ子にしない． |
-| `done` | 全ノードの生成が完了し，ノートブックを `ready` にした後 | 終端イベント． |
+| `node` | ノード1件分の JSON が確定し，DB に保存した直後 | 完成した1ノード（メインノードまたはサブノード）．トークン断片は送らない（4.3.2）． |
+| `done` | 全ノードの生成が完了し，マップを `ready` にした後 | 終端イベント． |
 | `error` | 生成を続けられなくなったとき | 終端イベント． |
 
-* `node` の `data` は次の項目を持つ．`id` は DB 保存後のノード ID であり，`prerequisites` の各要素も保存後の ID とする．`GET /api/notebooks/:id/map` のノード表現と共通する項目（`id`，`title`，`route_type`，`importance_score` など）は，同じ名前・意味とする．埋め込みベクトルは含めない．
+* `node` の `data` は次の項目を持つ．ID はすべて DB 保存後の ID とする．`GET /api/maps/:id` のノード表現と共通する項目は，同じ名前・意味とする．
 
   | 項目 | 型 | 説明 |
   | :--- | :--- | :--- |
-  | `id` | number | `syllabus_nodes.id` |
+  | `id` | number | `nodes.id` |
   | `title` | string | ノードのタイトル |
-  | `summary` | string | ノードの要約 |
-  | `prerequisites` | number[] | 前提ノードの ID（4.2.4） |
-  | `route_type` | string | `main` / `sub` |
-  | `importance_score` | number | 0〜1 |
-  | `depth_level` | number | ドリルダウンの階層（F-007） |
-  | `parent_node_id` | number \| null | ドリルダウンの親ノード ID（F-007）．`depth_level = 0` の場合は `null` |
-  | `related_main_node_id` | number \| null | `route_type = sub` の場合の紐付け先メインノード |
+  | `summary` | string | ノードの概要 |
+  | `is_main` | boolean | このマップのメインノードなら `true`，サブノードなら `false` |
+  | `parent_node_id` | number \| null | サブノードの場合，そのサブノードを持つノードの ID．メインノードの場合は `null` |
+  | `from` | number[] | このノードへ道がのびてくるノードの ID．メインノードならこのマップの `map_paths`，サブノードなら同じノードの中の `sub_node_paths` |
+  | `importance_score` | number \| null | メインノードの場合のみ（0〜1） |
+  | `reused` | boolean | 既存ノードを再利用した場合 `true`（F-015） |
+  | `progress` | string | 現在の進捗．再利用した既知ノードは学習中・完了で届くことがあり，F-009 の演出に使う |
+  | `detour` | object \| null | メインノードの場合のみ．寄り道（`id`，`title`，`reason`） |
 
-* `link_proposal` の `data` は `GET /api/cross_notebook_links?status=proposed` の `proposals` の要素と同じ形（`link_id`，`similarity_score`，`source`，`target`）とする．`source.node_id` は直前に送った `node` の `id` と一致する．
-* `done` の `data` は `notebook_id`，`status`（`"ready"` 固定），`node_count`（保存したノード数）を持つ．
+* 再利用したノードの既存のサブノードは，そのノードの `node` イベントの後に，`reused: true` の `node` イベントとして送る．
+* `done` の `data` は `map_id`，`status`（`"ready"` 固定），`node_count`（送ったノード数）を持つ．
 * `error` の `data` は `code`，`message`，`retryable` を持つ．`message` は利用者に表示してよい文言とし，内部例外の詳細や API キーは含めない．`retryable` はクライアントが生成のやり直しを提案してよいかを示す．
 
   | `code` | 意味 | `retryable` |
   | :--- | :--- | :--- |
   | `parse_failed` | LLM 出力のパースに失敗し，リトライ上限（最大2回，4.2.4）を超えた | `true` |
-  | `invalid_syllabus` | 循環や未知の前提 ID など DAG の検証エラー．該当エッジを黙って除去・修正しない | `true` |
+  | `invalid_map` | 道やサブノードの循環，未知の参照など 4.2.4 の検証エラー．該当する道やサブノードを黙って除去・修正しない | `true` |
   | `llm_api_error` | LLM API の呼び出しに失敗した | `true` |
   | `internal_error` | 上記以外のサーバー内部エラー | `false` |
 
-* Embedding API の呼び出しに失敗した場合（4.2.7）は `error` を送らず，生成を続ける．リンク提案は補助的な機能であり，その失敗でシラバス生成全体を止めないためである．該当ノードの `link_proposal` は送らず，失敗はサーバーのログに記録する．
 * `done` と `error` は終端イベントであり，サーバーはどちらかを送った後に接続を閉じる．クライアントは終端イベントを受け取らずに接続が切れた場合，生成が完了していないものとして扱う．切断時の再接続・再開の挙動は未決（9章）のため，`id:` 行による再開は定義しない．
 * 接続維持のため，サーバーはコメント行（`: keep-alive`）を送ってよい．クライアントはコメント行を無視する．
 
-**`POST /api/notebooks/:id/syllabus` SSE レスポンス例（正常終了）**
+**`POST /api/maps/:id/generation` SSE レスポンス例（正常終了）**
 
 ```
 event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
-
-event: link_proposal
-data: {"link_id":8801,"similarity_score":0.86,"source":{"notebook_id":123,"notebook_title":"AIエンジニアリング入門","node_id":501,"title":"統計学の基礎"},"target":{"notebook_id":124,"notebook_title":"データ分析基礎","node_id":733,"title":"統計学の基礎"}}
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[],"importance_score":0.8,"reused":true,"progress":"completed","detour":{"id":77,"title":"ベイズ統計","reason":"確率の更新という考え方に触れる"}}
 
 event: node
-data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","prerequisites":[501],"route_type":"main","importance_score":0.9,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
+data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[501],"importance_score":0.9,"reused":false,"progress":"not_started","detour":null}
 
 : keep-alive
 
 event: node
-data: {"id":620,"title":"ベイズ統計への招待","summary":"確率の更新という考え方に触れる","prerequisites":[501],"route_type":"sub","importance_score":0.3,"depth_level":0,"parent_node_id":null,"related_main_node_id":501}
+data: {"id":610,"title":"行列の積","summary":"行列どうしの掛け算の意味を学ぶ","is_main":false,"parent_node_id":502,"from":[],"importance_score":null,"reused":false,"progress":"not_started","detour":null}
 
 event: done
-data: {"notebook_id":123,"status":"ready","node_count":3}
+data: {"map_id":123,"status":"ready","node_count":3}
 
 ```
 
-**`POST /api/notebooks/:id/syllabus` SSE レスポンス例（エラー終了）**
+**`POST /api/maps/:id/generation` SSE レスポンス例（エラー終了）**
 
 ```
 event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","prerequisites":[],"route_type":"main","importance_score":0.8,"depth_level":0,"parent_node_id":null,"related_main_node_id":null}
+data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[],"importance_score":0.8,"reused":true,"progress":"completed","detour":null}
 
 event: error
-data: {"code":"parse_failed","message":"シラバスの生成結果を解析できませんでした．時間をおいて再度お試しください．","retryable":true}
+data: {"code":"parse_failed","message":"マップの生成結果を解析できませんでした．時間をおいて再度お試しください．","retryable":true}
 
 ```
-
-> 学習マップの画面遷移・URL構成（例：ノートブック一覧から学習マップへどう遷移するか，提案をどこで通知するか）は 9章の論点確定後に追記する．
 
 #### 4.3.2 バックエンド–LLM API
 
 * プロンプトテンプレートはソースコードから切り離して管理する（ReqDef 5.4）．具体的には，YAML等の外部ファイル，または LangChain/LangSmith 等のオーケストレーションツールでのバージョン管理を想定し，無停止でのA/Bテスト・チューニングを可能にする．
 * LLM APIへのリクエスト時には，各社が提供する「学習利用オプトアウト」設定を必須パラメータとして常に付与する（ReqDef 5.3）．
 * ストリーミングレスポンスは，LLM側のトークン単位のストリームをバックエンドで「1ノード分のJSONが確定した時点」でバッファリングし直し，フロントエンドへはノード単位のSSEイベントとして中継する．これにより，フロントエンドはトークン断片ではなく意味のある単位で描画できる．イベント名とペイロードの形式は 4.3.1 の「SSE イベント形式」に定める．
-* クロスノートブックリンクの検出（4.2.7）で使用する埋め込み計算も，シラバス生成と同じLLMベンダーのEmbedding APIを利用し，APIキー管理・オプトアウト設定は同一の仕組みに乗せる．
 
 ### 4.4 UI/UX設計方針（認知負荷の軽減）
 
-ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロントエンドは学習マップを以下の方針で構成する．学習マップは「全体を俯瞰できる地図」であると同時に，コンパスによって「今どこへ進めるか」に意識を集中させる画面と位置付ける．
+ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロントエンドはマップ画面を以下の方針で構成する．マップは「全体を俯瞰できる地図」であると同時に，コンパスによって「今どこへ進めるか」に意識を集中させる画面と位置付ける．
 
-**学習マップ**
+**画面と URL**
 
-* 初期表示では `depth_level = 0` の地点のみを描き，個々のノードの詳細（`summary` 等）は出さず，タイトルと繋がりのみを見せることで情報量を制御する．詳細は地点を選んだときに表示する．
-* 初期表示の視点は現在地とその周辺（現在地の前提ノード，コンパスの候補）に寄せ，全体はユーザーが能動的に広げて眺める．
-* 地点を選ぶとその内部（子ノード）を展開する（F-007，4.2.6）．
-* サブクエストは，関連するメインルートの地点から伸びる脇道として描く（F-006）．
-* 新しい章の開始時は，既習の地点から新しい地点へ道がつながるアニメーション演出を行う（F-009）．
-* 承認済みのクロスノートブックリンク（`cross_notebook_links.status='accepted'`）を持つノードには，他ノートブックへの接続を示す視覚的な印（衛星アイコン等）を付け，選択すると接続先ノートブックのタイトルとノードが表示される．
-* 未応答の提案（`status='proposed'`）は，学習マップ内で控えめに（例えば点線や薄い色で）示すか，別途通知として提示するかは9章で検討中．いずれの場合も，提案はユーザーが明示的に承認するまでデータ上のリンクとして確定しないことを画面上で明確にする．
+| 画面 | URL | 内容 |
+| :--- | :--- | :--- |
+| S-01 マップ一覧 | `/maps` | マップを平らに並べる．元ノードや寄り道から作ったマップには「Ruby の『オブジェクト指向』から」「Ruby の『Web アプリ開発』からの寄り道」のような注記を付ける（入れ子にはしない．マップ間ノードにより複数の親を持ち得るため）． |
+| S-02 初期入力 | `/maps/new` | 興味，ゴール，難易度，アセスメント．寄り道から作る場合は寄り道のテーマを興味として入力済みにする． |
+| S-03 マップ画面 | `/maps/:mapId` | ノードを選んでいる状態は `?node=:nodeId` で表し，ブラウザの戻る・再読み込みで選択を保つ．ドリルダウンも同じパラメータで表す． |
+
+**生成から最初の表示まで**
+
+1. S-02 で最後のアセスメント回答を送ると，すぐに S-03 に移る．マップは空で，「マップを作っています」と表示する．
+2. `node` イベントが届くたびにノードを1つずつ描き，道でつなぐ．再利用された既知ノードは最初から埋まった状態で現れ，そこから新しいノードへ道がのびるアニメーションを出す（F-009）．
+3. 生成中もノードを選んで詳細を読める．ただし，コンパスは生成が終わる（`done`）まで出さない．生成の途中では候補が後から変わるためである．
+4. 生成が終わるとコンパスを表示する．
+5. ユーザーが初めて S-03 を開いたときだけ，「現在地」「コンパス」「ノードを選ぶと詳細とサブノードが見られる」の3つを順に指す短い説明を重ねて出す（「次へ」「スキップ」付き）．2つ目以降のマップでは出さない．専用のオンボーディング画面は作らない．
+
+**マップ**
+
+* 初期表示ではメインノードのみを描き，個々のノードの詳細（`summary` 等）は出さず，タイトルと道のみを見せることで情報量を制御する．
+* 初期表示の視点は現在地とその周辺（現在地へ道がのびるノード，コンパス候補）に寄せ，全体はユーザーが能動的に広げて眺める．
+* ノードを選ぶと詳細パネルを開く（`GET /api/maps/:mapId/nodes/:nodeId`）．詳細パネルには概要，進捗，寄り道（あれば），そのノードが登場する他のマップを示し，そこからサブノードを展開できる（F-007，4.2.6）．
+* マップ間ノードには「他のマップと共通」の印を付ける．
+* 元ノードには「中にマップがある」印を付け，選ぶとドリルダウンの代わりにそのマップへ移動する（F-017）．
+* 寄り道は，まだマップを作っていない間は詳細パネルにだけ表示し，マップには描かない．寄り道からマップを作ったら，寄り道の出発点から点線でのびる行き止まりの入口として描き，選ぶとそのマップへ移動する．寄り道の入口は進捗を持たず，コンパスの計算にも使わない（F-006）．
+* 別のマップへ移動した後は，ブラウザの戻ると，画面上部の「← 来たマップへ戻る」で戻る．マップ間ノードにより同じマップへ複数のマップから来られるため，固定の階層を表すパンくずリストは作らない．
 
 **コンパス**
 
-* 学習マップ上で現在地を明示し，コンパスが「進める方角」（4.2.8 の候補）をすべて指し示す．`importance_score` の最も高い候補を強調し，迷ったときの目安にする．
-* 候補を選ぶとその地点の詳細を表示し，学習を開始できる（進捗を `in_progress` に更新）．
-* 現在地がない場合（スタート地点）は，前提ノードを持たない地点が候補として示される．
-* 全ノード完了時（`is_goal_reached = true`）は，ゴール到達を示す表示に切り替える．
+* マップ上で現在地を明示し，コンパスが候補（4.2.8）をすべて指し示す．`importance_score` の最も高い候補を強調し，迷ったときの目安にする．
+* 候補を選ぶとそのノードの詳細を表示し，学習を開始できる（進捗を `in_progress` に更新）．候補でないノードも開始できる．
+* 現在地がない場合（スタート地点）でも，候補の決め方は同じである．道がのびてこないノードや，手前がすべて既知ノードであるノードが候補になる．
+* 全ノード完了時（`is_goal_reached = true`）は，ゴール到達を示す表示に切り替える．`origin_completion_suggestion` が返った場合は，元ノードを完了にするかを尋ねる．
+
+**マップの削除**
+
+* 削除の前に `GET /api/maps/:id/deletion_preview` の結果を示し，このマップで学習中にしたノードは他のマップで通常の学習中ノードとして扱われること（既知ノードにはならないこと）を注意として知らせる．
 
 ### 4.5 CLI設計（F-014）
 
 #### 4.5.1 方針
 
-* CLI はフロントエンドと同列の「バックエンドAPIのクライアント」であり，4.3.1 の API のみを利用する．コンパス（4.2.8），DAG の検証，クロスノートブックリンクの検出といった業務ロジックは持たず，バックエンドが返した結果をそのまま表示する．これにより，フロントエンドと CLI で表示内容が食い違わない．
-* 外部LLM API・Embedding API を直接呼ばず，それらのAPIキーも保持しない（ReqDef 5.3）．
+* CLI はフロントエンドと同列の「バックエンドAPIのクライアント」であり，4.3.1 の API のみを利用する．コンパス（4.2.8），道やサブノードの検証，既存ノードの再利用といった業務ロジックは持たず，バックエンドが返した結果をそのまま表示する．これにより，フロントエンドと CLI で表示内容が食い違わない．
+* 外部LLM API を直接呼ばず，そのAPIキーも保持しない（ReqDef 5.3）．
 * Go の標準ライブラリ（`flag`，`net/http`，`encoding/json`，`bufio` 等）のみで実装し，外部パッケージに依存しない．単一の実行ファイルとして配布しやすく（ReqDef 5.1），依存パッケージの更新・脆弱性対応の負担もなくなる．
 * 接続先のバックエンドは環境変数 `CAMPASS_API_URL` で指定する．
 
@@ -582,21 +629,21 @@ cli/
 └── internal/
     ├── command/          # コマンド層：引数解析・対話入力
     ├── api/              # API通信層：REST，SSE 受信，トークン付与
-    ├── render/           # 表示層：学習マップ・コンパス・提案のテキスト出力
+    ├── render/           # 表示層：マップ・コンパス・ノード詳細のテキスト出力
     └── config/           # 接続先とトークンの読み書き
 ```
 
 レイヤーの役割は基本設計書 2.4，コマンド一覧は基本設計書 3.5 を参照する．
 
-#### 4.5.3 ノートブック作成の対話フロー（`campass new`）
+#### 4.5.3 マップ作成の対話フロー（`campass new`）
 
 3.2 のステップ1〜6を，ターミナル上の対話として順に行う．
 
 1. 興味を自由入力させ，ゴール候補（F-002）が返った場合は番号付きで表示して選ばせる．再入力の扱いは 4.2.1 に従い，バックエンドが判定する．
 2. 難易度（ライト／スタンダード／ディープ）を番号で選ばせる（F-003）．
 3. アセスメントの質問（F-004）を1問ずつ表示し，回答を送信する．
-4. `POST /api/notebooks/:id/syllabus` の SSE を受信し，ノードが1件届くたびにタイトルと種別（メイン／サブ）を1行で表示する（4.5.6）．`link_proposal` イベントが届いた場合は，「提案」であることが分かる形で表示する．ここでは承認しない．
-5. ストリームが終わったら `GET /api/notebooks/:id/map` を呼び，学習マップとコンパスを表示する（4.5.5）．
+4. `POST /api/maps/:id/generation` の SSE を受信し，ノードが1件届くたびにタイトルと種別（メイン／サブ）を1行で表示する（4.5.6）．再利用したノードには「共通」の印と進捗を付ける．
+5. ストリームが終わったら `GET /api/maps/:id` を呼び，マップとコンパスを表示する（4.5.5）．
 
 #### 4.5.4 認証
 
@@ -606,60 +653,60 @@ cli/
 * `campass logout` は `DELETE /api/auth/tokens/current` でトークンを失効させてから，ローカルのファイルを削除する．
 * Cookie セッションではなくトークン方式とする理由は 5.6 を参照する．
 
-#### 4.5.5 学習マップとコンパスのテキスト表示（`campass map`）
+#### 4.5.5 マップとコンパスのテキスト表示（`campass map`）
 
-一本道ビューは廃止されているため（4.2.5），CLI でもノードを「学習する順番」に見える一列として表示しない．表示はコンパスを主とし，グラフは各ノードの前提関係として示す．
+一本道ビューは廃止されているため（4.2.5），CLI でもノードを「学習する順番」に見える一列として表示しない．表示はコンパスを主とし，グラフは各ノードへ道がのびてくるノードとして示す．
 
 ```
 コンパス
   現在地: 統計学の基礎 (#501)
-  進める方角:
+  コンパス候補:
     ★ 線形代数の基礎 (#502)  重要度 0.90
       微分の基礎     (#503)  重要度 0.60
 
-学習マップ
-  #501 統計学の基礎    [完了]   ⇄ データ分析基礎「統計学の基礎」
-       └ 寄り道 #620 ベイズ統計への招待 [未着手]
-  #502 線形代数の基礎  [未着手] ← 前提: #501
-  #503 微分の基礎      [未着手] ← 前提: #501
+マップ
+  #501 統計学の基礎    [完了]   共通: データ分析基礎
+       └ 寄り道のマップ: ベイズ統計 (map #140)
+  #502 線形代数の基礎  [未着手] ← 道: #501
+  #503 微分の基礎      [未着手] ← 道: #501   マップあり: 微積分 (map #150)
 ```
 
-* 「進める方角」は `compass.candidates` の並び（4.2.8）のまま表示し，先頭の候補に印（★）を付ける．CLI では並べ替えない．
-* 学習マップの各行は，ノードとその必須の前提ノード（`relation_type = 'required'`）を示す．`supplementary` のエッジは「補足:」として別に示す．行の並びは API レスポンスの順であり，学習順の意味を持たない．
-* サブクエストは，`related_main_node_id` のメインノードの下に「寄り道」として字下げして表示する（F-006）．
-* 承認済みのクロスノートブックリンクには印（⇄）と接続先を付ける．未応答の提案は `campass links` で確認する．
+* コンパス候補は `compass.candidates` の並び（4.2.8）のまま表示し，先頭の候補に印（★）を付ける．CLI では並べ替えない．
+* マップの各行は，メインノードと，そのノードへ道がのびてくるノードを示す．行の並びは API レスポンスの順であり，学習順の意味を持たない．
+* マップ間ノードには「共通:」として他のマップ名を付ける．元ノードには「マップあり:」，寄り道から作ったマップは寄り道の出発点の下に字下げして示す（F-006，F-017）．まだマップを作っていない寄り道は `campass show` で表示する．
 * `is_goal_reached` が `true` の場合は，候補の代わりにゴール到達を表示する．
-* `campass show <node_id>` は `GET /api/nodes/:id/children` の結果を同じ形式で表示する（F-007）．
+* `campass show <map_id> <node_id>` は `GET /api/maps/:mapId/nodes/:nodeId` の詳細と，`GET /api/nodes/:id/sub_nodes` のサブノードを同じ形式で表示する（F-007）．
+* `campass start <map_id> <node_id>` / `campass done <map_id> <node_id>` は `PATCH /api/maps/:mapId/nodes/:nodeId/progress` を呼び，更新後のコンパスを表示する．`origin_completion_suggestion` が返った場合は，元ノードを `campass done` で完了にできることを案内する．
 
-#### 4.5.6 シラバス生成のストリーミング受信
+#### 4.5.6 マップ生成のストリーミング受信
 
-* SSE のレスポンスを `bufio.Scanner` で1行ずつ読み，空行までの `data:` 行をつなげて1イベントとし，JSON としてデコードする．`event:` 行のイベント名で処理を分岐する（形式は 4.3.1）．`node` は1イベントが1ノードに対応するため（4.3.2），デコードできたらすぐに表示する．`link_proposal` は「提案」として表示する（4.5.3）．
+* SSE のレスポンスを `bufio.Scanner` で1行ずつ読み，空行までの `data:` 行をつなげて1イベントとし，JSON としてデコードする．`event:` 行のイベント名で処理を分岐する（形式は 4.3.1）．`node` は1イベントが1ノードに対応するため（4.3.2），デコードできたらすぐに表示する．
 * `bufio.Scanner` は既定で1行64KBまでしか読めないため，`summary` の長いノードに備えて上限を広げる．
-* `done` を受け取ったら受信を終えて `GET /api/notebooks/:id/map` に進む．`error` を受け取ったら `code` と `message` を表示して終了する．どちらも受け取らずに接続が切れた場合は，生成が完了していないものとしてエラー表示する．
+* `done` を受け取ったら受信を終えて `GET /api/maps/:id` に進む．`error` を受け取ったら `code` と `message` を表示して終了する．どちらも受け取らずに接続が切れた場合は，生成が完了していないものとしてエラー表示する．
 * `:` で始まるコメント行は無視する．未知のイベント名は，エラーにせず読み飛ばす．
 * JSON としてデコードできないイベントは，黙って捨てずにエラーとして表示する．
 
 #### 4.5.7 未決事項
 
-CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得，生成中の中断，認証まわり，配布方法）．
+CLI に関わる未決事項は 9章にまとめる（生成中の中断，認証まわり，配布方法）．
 
 ## 5. 検討した代替案（Alternatives Considered）
 
 ### 5.1 グラフ表現：グラフDB vs リレーショナルDB（ノード・エッジ方式）
 
 * **案A（採用）**: MySQL 上にノード・エッジテーブルを設けてグラフを表現する．
-  * 利点: 既存の技術スタック（MySQL）をそのまま使え，スモールスタート（100〜1,000 DAU）の規模では十分な性能が出せる．ノートブック単位でのトランザクション管理も容易．
+  * 利点: 既存の技術スタック（MySQL）をそのまま使え，スモールスタート（100〜1,000 DAU）の規模では十分な性能が出せる．マップ単位でのトランザクション管理も容易．
   * 欠点: 深い階層の依存関係探索（多段階のJOIN）はグラフDBほど高速ではない．
 * **案B（不採用）**: Neo4j 等の専用グラフDBを導入する．
   * 利点: 依存関係の探索・パス検索がネイティブに高速．
-  * 欠点: ReqDef 6章で技術スタックがMySQLと明記されており，インフラ構成が複雑化する．初期リリース規模（ReqDef 5.2）に対して過剰投資であると判断し，不採用とした．ただし「学習マップ」実装時にノード数・エッジ数が大幅に増加する場合は再検討の余地を残す．
+  * 欠点: ReqDef 6章で技術スタックがMySQLと明記されており，インフラ構成が複雑化する．初期リリース規模（ReqDef 5.2）に対して過剰投資であると判断し，不採用とした．ただしノード数・道の数が大幅に増加する場合は再検討の余地を残す．
 
-### 5.2 シラバス生成方式：一括生成 vs ストリーミング生成
+### 5.2 マップ生成方式：一括生成 vs ストリーミング生成
 
 * **案A（採用）**: LLMにノード単位でストリーミング生成させ，逐次DB保存・逐次UI描画する．
   * 利点: ReqDef 5.2 が要求する体感待ち時間の最小化を満たす．生成途中でユーザーが最初の一歩を読み始められる．
   * 欠点: ノード単位でのJSONパース処理，および途中でエラーが起きた場合のロールバック処理が複雑になる．
-* **案B（不採用）**: シラバス全体を一括生成してから一度にレスポンスする．
+* **案B（不採用）**: マップ全体を一括生成してから一度にレスポンスする．
   * 利点: 実装がシンプルで，JSON全体の整合性検証がしやすい．
   * 欠点: 生成に数十秒かかる間ユーザーが何も見えない状態になり，ReqDef 5.2 の要件を満たさない．
 
@@ -673,7 +720,10 @@ CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得�
   * 利点: バックエンドの実装がシンプル．
   * 欠点: 同順位ノードの順序がリクエストごとに揺れる可能性があり，「一本道」という体験の一貫性を損なう．また，進捗管理（F-010）とノードの並び順を紐付けにくい．
 
-### 5.4 クロスノートブックリンクの関連度判定：Embedding類似度 vs 別方式
+### 5.4 クロスノートブックリンクの関連度判定：Embedding類似度 vs 別方式（v0.9.0 で廃止）
+
+> v0.9.0 でノードをマップ間で共有する方式（5.7，ADR 0003）に変えたため，本検討は不要となった．なお，当時不採用とした案B（既存ノード一覧をLLMに渡す）が，現在の 4.2.4 の方式の基になっている．経緯の記録として残す．
+
 
 * **案A（採用）**: 外部Embedding APIでベクトル化し，アプリケーション層でのコサイン類似度によって他ノートブックの既存ノードとの関連を検出し，ユーザーへの提案として`cross_notebook_links`に記録する（4.2.7）．
   * 利点: 「統計学の基礎」「統計の基本」のような表記揺れをある程度吸収できる．ルールベースでは対応しきれない言い回しの違いに強い．専用ベクトルDBを導入しないため，今回の想定規模（ReqDef 5.2）に対して過剰投資にならない．統合ではなく提案に留めるため，誤検出があってもユーザーが却下すれば実害が小さい．
@@ -706,41 +756,71 @@ CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得�
   * 利点: バックエンドの認証の仕組みを1つにできる．
   * 欠点: CLI 側で Cookie と CSRF 対策を扱う必要があり，実装が複雑になる．
 
+### 5.7 マップ間の関係：ノードの共有 vs リンク（ADR 0003）
+
+* **案A（採用）**: ノードをユーザーの持ち物とし，マップ生成時に既存ノードをLLMに伝えて再利用させる．内容と進捗は共有し，道・メインノードかどうか・重要度はマップごとに持つ．
+  * 利点: 同じ内容を2回学ばずに済み，進捗がマップ間で自然に揃う．Embedding API と提案・承認の流れが不要になる．
+  * 欠点: プロンプトに既存ノードを含めるため，ノード数が増えるとプロンプトが長くなる（9章）．マップが自分のノードを持たなくなるため，削除や現在地の扱いが複雑になる（4.1.2，4.2.8）．
+* **案B（不採用）**: ノードはマップごとに別々に持ち，似たノードを Embedding で検出して提案し，承認されたらリンクする（v0.8.0 までの設計）．
+  * 欠点: 同じ内容を別々に学習・管理することになり，リンクは進捗を運ばない．
+* **案C（不採用）**: 生成中に既存ノードの再利用ごとにユーザーの承認を求める．
+  * 欠点: マップが育っていく様子を眺める体験が途切れる．
+* **案D（不採用）**: 生成後に Embedding で重複を検出して取り除く．
+  * 欠点: 取り除いたノードへの道が切れ，そのノードがすでに SSE で送られている可能性がある．
+
+### 5.8 任意のテーマの扱い：サブクエスト vs 寄り道（ADR 0002）
+
+* **案A（採用）**: ゴールとの関係が薄いテーマは，ノードではなく寄り道（新しいマップの提案）とする．
+  * 利点: マップのノードはすべてゴールに必要なものになり，進捗・コンパス・ゴール到達の計算で例外を作らずに済む．
+* **案B（不採用）**: サブクエスト（`route_type = sub`）としてマップの中のノードに残し，脇道として描く（v0.8.0 までの設計）．
+  * 欠点: ノードに関するあらゆる計算で，サブクエストを除外する特別扱いが必要になる．
+
+### 5.9 現在地：都度導出 vs マップごとに保存
+
+* **案A（採用）**: 現在地をマップごとに保存し（`maps.current_node_id`），そのマップでメインノードを開始・完了したときに更新する．
+  * 利点: 進捗がマップ間で共有されても，他のマップでの学習で現在地が動かない．実装が単純である．
+* **案B（不採用）**: マップごとの位置づけに「このマップで最後に開始・完了した日時」を持たせ，現在地を都度導出する．
+  * 利点: 保存した現在地と進捗がずれない．
+  * 欠点: 導出の処理が増える．現在地を「このマップで最後に開始・完了したノード」と定義すれば，案Aでもずれは問題にならない．
+
 ## 6. 懸念事項（Caveats / Security / Privacy Concerns）
 
 * **APIキーの秘匿化**: 外部LLM APIキーは必ずバックエンド（サーバーサイド）で管理し，フロントエンドへ絶対に露出させない．環境変数またはシークレットマネージャで管理し，リポジトリへのコミットを防ぐ仕組み（lint / pre-commit hook 等）を導入する（ReqDef 5.3）．
 * **学習データへの利用オプトアウト**: ユーザーの自由記述ワーク（ゴール入力・アセスメント回答等）に個人情報や機密情報が含まれる可能性があるため，LLM API呼び出し時には「モデル学習への非利用（オプトアウト）」設定を必須パラメータとし，リクエスト送信前にこの設定が有効であることをバックエンド側でバリデーションする（ReqDef 5.3）．
 * **CLI のトークン管理**: CLI のトークンはユーザーの端末にファイルとして保存されるため，所有者のみ読み書きできる権限（0600）で保存し，有効期限を設ける．`campass logout` で失効でき，DBにはハッシュのみを保存する（4.5.4）．
 * **プロンプトインジェクション対策**: ユーザーの自由入力がそのままLLMへのプロンプトに埋め込まれるため，システムプロンプトとユーザー入力を明確に分離し，構造化出力（JSON Schema／ツール呼び出し）を強制することで，意図しない指示の混入や出力形式の破壊を防ぐ．
-* **ノートブックのデータ保持**: ノートブックおよび学習ログはユーザーが自ら削除するか退会するまで永続保持する方針のため，退会時のデータ削除フロー（物理削除 or 論理削除）を別途明確にする必要がある（ReqDef 5.4）．
+* **マップのデータ保持**: マップ，ノードおよび学習ログはユーザーが自ら削除するか退会するまで永続保持する方針のため，退会時のデータ削除フロー（物理削除 or 論理削除）を別途明確にする必要がある（ReqDef 5.4）．
+* **既存ノードの送信**: マップ生成のたびにユーザーの既存ノードのタイトルをLLMに送る．他ユーザーのノードは送らず，オプトアウト設定は他のリクエストと同じく必須とする．
 * **生成コンテンツの信頼性**: LLMが生成する学習ステップの内容やリンク先には誤り・幻覚（hallucination）が含まれ得る．本バージョンでは教材コンテンツ自体の制作を対象外としているため（Non Goals），外部リンクの生存確認や内容の正確性検証は当面ユーザーの判断に委ねる旨をUI上で明示する．
 
 ## 7. テスト方針（Test Plan）
 
-* **シラバス生成の構造検証**: LLMの出力に対し，JSON Schemaバリデーション，循環参照（DAGとして不正なエッジ）の検出，孤立ノードの検出を自動テストで行う．
+* **マップ生成の構造検証**: LLMの出力に対し，JSON Schemaバリデーション，`map_paths`・`sub_node_paths`・`sub_nodes` の循環の検出，未知の参照の検出，孤立ノードの検出を自動テストで行う（4.2.4）．
+* **既存ノードの再利用のテスト**: 既存ノードを再利用した出力から，`map_nodes`・`sub_nodes`・`progress_statuses` が正しく作られること（新しいノードを作らないこと，既存の進捗を引き継ぐこと，追加したサブノードが他のマップのドリルダウンにも現れること，他ユーザーのノードを参照できないこと）を検証する．元ノードからのマップで，生成したメインノードが元ノードのサブノードにも追加されることも確認する．
 * **難易度パラメータのマッピングテスト**: 「ライト／スタンダード／ディープ」それぞれの選択が，意図した `max_depth` 等のプロンプト制約に正しく変換されるかを検証する．
 * **ストリーミングのE2Eテスト**: SSE接続が途中で切断された場合の再接続・再開挙動，および途中までのノードがUIに正しく反映されることを確認する．
-* **クロスノートブックリンク検出ロジックのテスト**: 既知の類似・非類似タイトルのペアに対して，期待される提案／非提案の結果（4.2.7）が閾値付近でどう振れるかを検証するデータセットを用意し，回帰テストを行う．他ユーザーのノードに誤って提案されないこと，同一ペアへの重複提案が発生しないこと（UNIQUE制約）も合わせて検証する．
-* **コンパス決定ロジックのテスト**: 進捗状態の異なるシラバス（未着手のみ・途中まで完了・`in_progress` が複数・サブクエストのみ完了・全完了）と，分岐・合流を含むグラフ（`supplementary` エッジ混在を含む）に対して，4.2.8 の `current_node_id` / `candidates`（内容と並び順）/ `is_goal_reached` が期待どおりになるかを検証する．
-* **提案の承認／却下フローのテスト**: `PATCH /api/cross_notebook_links/:id` による状態遷移（`proposed → accepted / rejected`）が正しく行われ，却下後に同一ペアが再提案されないことを確認する．
+* **コンパス決定ロジックのテスト**: 進捗状態の異なるマップ（未着手のみ・途中まで完了・`in_progress` が複数・サブノードのみ完了・全完了）と，分岐・合流を含むグラフに対して，4.2.8 の `current_node_id` / `candidates`（内容と並び順）/ `is_goal_reached` が期待どおりになるかを検証する．マップ間ノードについては，他のマップで学習中・完了のノード（既知ノード）が候補から外れ，道の手前として満たされること，このマップで学習中にしたノードは候補に残ること，`started_map_id` が NULL の学習中ノードが既知ノードにならないことを検証する．
+* **現在地と進捗更新のテスト**: `PATCH /api/maps/:mapId/nodes/:nodeId/progress` で，そのマップの現在地だけが動き，同じノードが登場する他のマップの現在地は動かないこと，`started_map_id` が記録・解除されること，ゴール到達時に元ノードがあれば `origin_completion_suggestion` が返り，元ノードが自動で完了にならないことを確認する．
+* **マップ削除のテスト**: 他のマップに登場するノードと進捗が残り，どこにも登場しなくなったノードが削除されること，`deletion_preview` がそのマップで学習中にしたノードを返すことを確認する．
 * **セキュリティテスト**: APIキーがフロントエンドのレスポンス・ソースマップ等に含まれていないことのスキャン，オプトアウト設定が常にリクエストに付与されていることの回帰テスト．
-* **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．学習マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．トークンファイルが 0600 で保存されることも確認する．
-* **負荷テスト**: ReqDef 5.2 の想定同時接続数（通常100 DAU，ピーク1,000 DAU）を基準としたシラバス生成APIの負荷試験．
+* **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．トークンファイルが 0600 で保存されることも確認する．
+* **負荷テスト**: ReqDef 5.2 の想定同時接続数（通常100 DAU，ピーク1,000 DAU）を基準としたマップ生成APIの負荷試験．
 
 ## 8. 運用・段階的リリース計画
 
 * 初期リリースはスモールスタート仕様（通常100 DAU／ピーク1,000 DAU）のインフラ構成とし，将来的なアクセス急増時はパブリッククラウド（AWS等）でのスケールアップ／スケールアウトを前提とした設計に留める（ReqDef 5.2）．
 * プロンプトテンプレートはソースコードのデプロイサイクルと切り離し，無停止でのA/Bテスト・チューニングを可能にする（ReqDef 5.4）．
-* リリース初期はコア体験として F-001〜F-004, F-011 に加え，学習マップ（同一ノートブックのグラフ可視化），コンパス（F-013），クロスノートブックリンクの提案（4.2.7）も優先実装の対象とする．これは1章で確定した「学習マップとコンパスで進む」という目的そのものに直結するためである．優先度「低」の機能（F-009 既存ノード合流演出，F-010 マイルストーン成果物提示）は後続フェーズで段階的に追加する．
-* クロスノートブックリンクの検出（4.2.7）はEmbedding APIコストとチューニング未了のリスクを抱えるため，初期リリース時点では類似度閾値を保守的（提案されにくい方向）に設定し，的外れな提案よりも気づきの機会を逃すことを許容する運用とする．閾値の最適化は9章のオープンな論点として運用開始後にデータドリブンで進める．
+* リリース初期はコア体験として F-001〜F-004, F-011 に加え，マップ（グラフ可視化），コンパス（F-013），マップ間ノード（F-015），寄り道（F-006）も優先実装の対象とする．これは1章で確定した「マップとコンパスで進む」という目的そのものに直結するためである．優先度「低」の機能（F-009 既知ノードからの道の演出，F-010 マイルストーン成果物提示，F-016 ノードの深掘り，F-017 ノードのマップ化）は後続フェーズで段階的に追加する．
 
 ## 9. オープンな論点（今後議論が必要な事項）
 
-* **【最優先】学習マップとクロスノートブックリンクの画面設計**: 学習マップは「同一ノートブック内のグラフをそのまま可視化したもの」，クロスノートブックリンクは「提案→承認を経て追加される他ノートブックへの接続」であるという役割分担（1〜2章）は確定した．一方で，(a) 学習マップへの具体的な遷移フロー・URL構成，(b) クロスノートブックリンクの提案をどこで（学習マップ内／通知／別画面）ユーザーに提示するか，(c) 学習マップの初回導入タイミング（オンボーディング時に見せるか等）は未確定であり，実装着手前に確定させる必要がある．
-* クロスノートブックリンクの関連度判定（4.2.7）における類似度の閾値（暫定 0.80）は実データでの検証が必要．また，1つの新規ノードに対して複数の提案が生成された場合の表示上限やまとめ方も未検討．
+* **既存ノード一覧のプロンプト長**: マップ生成時にユーザーの全ノードをLLMに渡すため（4.2.4），ノード数が増えるとプロンプトが長くなりコスト・レイテンシが悪化する．ゴールと関係の近いノードだけを渡す絞り込み（Embedding による選別等）をいつ・どう導入するか．
+* **同時生成時のサブノード重複**: 2つのマップを同時に生成し，同じ再利用ノードにサブノードを追加すると，重複したサブノードができ得る．初期リリースでは対処しない．
+* **マップ間ノードの共有解除**: 再利用が誤っていた場合に，ノードの共有を解除する機能を設けるか．
+* **F-003 の見直し**: 後のフェーズで F-016（もっと詳しく）と F-017（ノードのマップ化）が入った後，最初に難易度を選ばせる必要があるか．
+* **F-016 / F-017 の詳細**: 「もっと詳しく」で追加するサブノードの生成方法と API，ノードのマップ化の API と UI．
 * LLM生成コンテンツの品質担保（幻覚対策）について，将来的にファクトチェック機構やユーザーフィードバックによる品質改善ループを設けるか．
 * ストリーミング中にユーザーが離脱・再訪した場合の生成状態の扱い（生成継続／破棄／再開）．CLI（4.5）で生成中に Ctrl+C で接続が切れた場合も同じ論点として合わせて決める．
-* **ノード詳細の取得**: 学習マップは `summary` を含まず（4.4），ノード単体の詳細を取得する API が未定義．フロントエンドで地点を選んだときの詳細表示と，CLI の `campass show` に共通の課題．
 * **フロントエンドの認証方式**: フロントエンドを Cookie セッションにするか，CLI と同じトークン方式（4.5.4，5.6）にするか．
 * **CLI トークンの有効期限**: `api_tokens.expires_at` に設定する期間と，期限切れ時の扱い．
 * **CLI のパスワード入力の非表示**: Go の標準ライブラリには端末のエコーを止める API がない．Unix 系では `stty` コマンドを使えるが，Windows での扱いが未決．
@@ -759,3 +839,4 @@ CLI に関わる未決事項は 9章にまとめる（ノード詳細の取得�
 | v0.6.0 | 2026/10/06 | 4.1.2 を DB 定義の正と明記し，`users` テーブルを追加．ER図の `assessment_targets` と 4.2.3 の `assessment_results` を `assessment_answers` に統一．フロントエンドへのストリーミング方式を SSE に統一（3.1） | 池田 琉俊 |
 | v0.7.0 | 2026/10/06 | CLI クライアント（ReqDef F-014）を追加．4.5（CLI設計），`api_tokens` テーブル，トークン発行・失効 API と `GET /api/notebooks` を追加し，4.3.1 をクライアント共通の API とした．5.5・5.6 に代替案，6〜7章に CLI の懸念事項とテスト方針，9章に CLI 関連の論点を追加 | 池田 琉俊 |
 | v0.8.0 | 2026/10/07 | シラバス生成 SSE のイベント形式を 4.3.1 に定義（`node` / `link_proposal` / `done` / `error`，エラーコード，終端の扱い，Embedding API 失敗時の扱い，レスポンス例）．リンク提案を `node` から独立したイベントとし，4.3.2，4.5.3，4.5.6，4.5.7 を整合．9章から解決済みの論点を削除 | 池田 琉俊 |
+| v0.9.0 | 2026/10/08 | 用語を GLOSSARY.md に合わせて整理（ノートブック・学習マップ・シラバスを「マップ」，前提を「道」に改称）．ノードをユーザーの持ち物としてマップ間で共有する方式に変更し（ADR 0003），4.1 のテーブルを再設計（`maps`，`nodes`，`map_nodes`，`map_paths`，`sub_nodes`，`sub_node_paths`，`detours`，`progress_statuses.started_map_id`）．サブクエストを寄り道に変更（ADR 0002），`supplementary`，クロスノートブックリンク（4.2.7）と Embedding を廃止．4.2.4（既存ノードの再利用），4.2.8（既知ノード，マップごとの現在地），4.3（API・SSE），4.4（画面・URL・初回表示），4.5（CLI）を更新し，5.7〜5.9 を追加．9章から解決済みの論点を削除し，新たな論点を追加 | 池田 琉俊 |
