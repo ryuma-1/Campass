@@ -16,6 +16,7 @@
 | v1.2.0 | 2026/10/06 | 一本道ビューを廃止し，S-03 を学習マップのみの画面に変更．syllabus_nodes の order_index を廃止し importance_score を追加 | 池田 琉俊 |
 | v1.3.0 | 2026/10/06 | 4章を概要（ER図・テーブル一覧）のみとし，カラム定義は Design Doc 4.1.2 を正とする形に変更（`syllabus_edges`，`progress_statuses`，アセスメント関連テーブルを ER図に追加）．5.1 のストリーミング方式を SSE に統一 | 池田 琉俊 |
 | v1.4.0 | 2026/10/06 | CLI クライアント（F-014）を追加．2.1 の全体構成に CLI を追加し，2.4 CLI構成，3.5 CLIコマンド一覧を新設．認証トークン用の `api_tokens` を ER図・テーブル一覧に追加 | 池田 琉俊 |
+| v1.5.0 | 2026/10/08 | 用語を GLOSSARY.md に合わせて整理（ノートブック・学習マップ・シラバスを「マップ」に統一）．ノードをユーザーの持ち物としてマップ間で共有する構成に合わせ，画面一覧・遷移図・URL，CLIコマンド，ER図・テーブル一覧を更新．クロスノートブックリンクと Embedding API 連携（5.2）を廃止 | 池田 琉俊 |
 
 ---
 
@@ -42,11 +43,11 @@ graph LR
 
 | サブシステム | 役割 |
 | :--- | :--- |
-| フロントエンド | React によるSPA．学習マップ（コンパス付き）などのUIを担当． |
+| フロントエンド | React によるSPA．マップ（コンパス付き）などのUIを担当． |
 | CLI | Go によるコマンドラインクライアント（F-014）．フロントエンドと同じバックエンドAPIを利用し，業務ロジックとAPIキーを持たない． |
-| バックエンド | Ruby on Rails によるAPIサーバー．LLM APIキーの秘匿管理，シラバスデータの生成・永続化を担当． |
-| データベース | MySQL．ノートブック，シラバスノード，ユーザー進捗等を永続保持． |
-| 外部LLM API | シラバスJSONの動的生成を担当．APIキーはバックエンドのみで保持し，フロントエンドには露出させない． |
+| バックエンド | Ruby on Rails によるAPIサーバー．LLM APIキーの秘匿管理，マップのデータの生成・永続化を担当． |
+| データベース | MySQL．マップ，ノード，ユーザー進捗等を永続保持． |
+| 外部LLM API | マップのデータ（JSON）の動的生成を担当．APIキーはバックエンドのみで保持し，フロントエンドには露出させない． |
 
 以降の2.2〜2.4では，上記サブシステムのうち「フロントエンド」「バックエンド」「CLI」それぞれの内部レイヤー構成を示す．
 
@@ -65,9 +66,9 @@ graph TD
 
 | レイヤー | 役割 |
 | :--- | :--- |
-| UIコンポーネント層 | 画面表示・ユーザー操作の受付．ノートブック一覧，初期入力，学習マップ等の各画面を構成する． |
-| 状態管理層 | 画面をまたいで参照するアプリケーション状態（現在のノートブック，シラバスデータ等）を保持・更新する． |
-| API通信層 | バックエンド API へのリクエスト送信，およびストリーミングレスポンス（シラバス逐次生成）の受信を担当する． |
+| UIコンポーネント層 | 画面表示・ユーザー操作の受付．マップ一覧，初期入力，マップ画面等の各画面を構成する． |
+| 状態管理層 | 画面をまたいで参照するアプリケーション状態（現在のマップ，ノード等）を保持・更新する． |
+| API通信層 | バックエンド API へのリクエスト送信，およびストリーミングレスポンス（マップの逐次生成）の受信を担当する． |
 
 ### 2.3 バックエンド構成
 
@@ -86,7 +87,7 @@ graph TD
 | レイヤ | 役割 |
 | :--- | :--- |
 | Controller層 | フロントエンドからのAPIリクエストを受け付け，レスポンス（通常/ストリーミング）を返却する． |
-| Service層 | シラバス生成・クロスノートブック類似度計算等のビジネスロジックを担当し，外部LLM API・Embedding APIとの連携を行う． |
+| Service層 | マップ生成・コンパスの導出等のビジネスロジックを担当し，外部LLM APIとの連携を行う． |
 | Model層 | ActiveRecordを通じてMySQLとのデータ入出力を担当する． |
 
 ### 2.4 CLI構成
@@ -105,8 +106,8 @@ graph TD
 | レイヤー | 役割 |
 | :--- | :--- |
 | コマンド層 | サブコマンドと引数の解析，および対話入力（ゴール候補の選択，アセスメントの回答等）を担当する． |
-| API通信層 | バックエンド API へのリクエスト送信（認証トークンの付与を含む），およびストリーミングレスポンス（シラバス逐次生成）の受信を担当する． |
-| 表示層 | バックエンドから受け取った学習マップ・コンパス・提案をターミナル向けのテキストとして出力する．コンパスなどの導出は行わない． |
+| API通信層 | バックエンド API へのリクエスト送信（認証トークンの付与を含む），およびストリーミングレスポンス（マップの逐次生成）の受信を担当する． |
+| 表示層 | バックエンドから受け取ったマップ・コンパス・ノード詳細をターミナル向けのテキストとして出力する．コンパスなどの導出は行わない． |
 
 * CLI は Go の標準ライブラリのみで実装し，外部パッケージに依存しない．詳細は Design Doc 4.5 を参照する．
 
@@ -116,11 +117,11 @@ graph TD
 
 ### 3.1 画面一覧
 
-| 画面ID | 画面名 | 概要 | 関連機能ID |
-| :--- | :--- | :--- | :--- |
-| S-01 | ノートブック一覧画面 | ユーザーが保持する複数の学習テーマ（ノートブック）を一覧表示し，新規作成・選択を行う． | F-012 |
-| S-02 | 初期入力画面 | 興味・ゴールの入力，ゴール候補の選択，難易度選択，前提知識アセスメントを行う． | F-001〜F-004 |
-| S-03 | 学習マップ画面 | LLMが生成したシラバスを表示する画面．シラバスノードをネットワーク図（学習マップ）として可視化し，現在地と，コンパスで今進める場所を指し示す．メイン/サブルートの表示の切り分けと，地点のドリルダウン展開に対応する． | F-006，F-007，F-009，F-010，F-013，非機能要件5.2 |
+| 画面ID | 画面名 | URL | 概要 | 関連機能ID |
+| :--- | :--- | :--- | :--- | :--- |
+| S-01 | マップ一覧画面 | `/maps` | ユーザーが保持する複数のマップを平らに一覧表示し，新規作成・選択を行う．元ノードや寄り道から作ったマップには「Ruby の『オブジェクト指向』から」のような注記を付ける． | F-012 |
+| S-02 | 初期入力画面 | `/maps/new` | 興味・ゴールの入力，ゴール候補の選択，難易度選択，前提知識アセスメントを行う．寄り道から作る場合は寄り道のテーマを興味として入力済みにする． | F-001〜F-004，F-006 |
+| S-03 | マップ画面 | `/maps/:mapId`（ノード選択中は `?node=:nodeId`） | メインノードと道をネットワーク図として可視化し，現在地と，コンパスで今進める場所を指し示す．ノードを選ぶと詳細パネル（概要，進捗，寄り道，登場する他のマップ）を開き，サブノードをドリルダウン展開する．元ノードや作成済みの寄り道からは別のマップへ移動できる． | F-006，F-007，F-009，F-010，F-013，F-015，非機能要件5.2 |
 
 ### 3.2 画面項目定義
 
@@ -128,13 +129,15 @@ graph TD
 
 ```mermaid
 graph TD
-    S01[S-01 ノートブック一覧画面]
+    S01[S-01 マップ一覧画面]
     S02[S-02 初期入力画面]
-    S03["S-03 学習マップ画面<br/>（学習マップ + コンパス）"]
+    S03["S-03 マップ画面<br/>（マップ + コンパス）"]
 
-    S01 -->|新規ノートブック作成| S02
-    S01 -->|既存ノートブックを選択| S03
-    S02 -->|シラバス生成完了| S03
+    S01 -->|新規マップ作成| S02
+    S01 -->|既存マップを選択| S03
+    S02 -->|生成開始（ノードを逐次描画）| S03
+    S03 -->|寄り道からマップを作成| S02
+    S03 -->|元ノード・寄り道の入口から移動 / 来たマップへ戻る| S03
     S03 -->|一覧に戻る| S01
 ```
 
@@ -147,12 +150,11 @@ CLI（F-014）は画面を持たないため，各画面に相当する操作を
 | コマンド | 概要 | 対応する画面 | 関連機能ID |
 | :--- | :--- | :--- | :--- |
 | `campass login` / `campass logout` | 認証トークンの取得・破棄 | — | — |
-| `campass notebooks` | ノートブック一覧の表示 | S-01 | F-012 |
-| `campass new` | 興味の入力からシラバス生成までを対話形式で行う．生成されたノードを1件ずつ表示する | S-02 | F-001〜F-004，F-011 |
-| `campass map <notebook_id>` | 学習マップ（`depth_level = 0`）とコンパスの表示 | S-03 | F-006，F-013 |
-| `campass show <node_id>` | ノードの子ノード群（ドリルダウン）の表示 | S-03 | F-007 |
-| `campass start <node_id>` / `campass done <node_id>` | 進捗の更新と，更新後のコンパスの表示 | S-03 | F-010，F-013 |
-| `campass links` / `campass accept <link_id>` / `campass reject <link_id>` | クロスノートブックリンク提案の一覧・承認・却下 | — | Design Doc 4.2.7 |
+| `campass maps` | マップ一覧の表示 | S-01 | F-012 |
+| `campass new` | 興味の入力からマップ生成までを対話形式で行う．生成されたノードを1件ずつ表示する | S-02 | F-001〜F-004，F-011 |
+| `campass map <map_id>` | マップ（メインノードと道）とコンパスの表示 | S-03 | F-006，F-013 |
+| `campass show <node_id>` | ノードの詳細（概要，進捗，寄り道，登場する他のマップ）とサブノード（ドリルダウン）の表示 | S-03 | F-007，F-015 |
+| `campass start <map_id> <node_id>` / `campass done <map_id> <node_id>` | 指定したマップでの進捗の更新と，更新後のコンパスの表示 | S-03 | F-010，F-013 |
 
 ---
 
@@ -166,20 +168,24 @@ CLI（F-014）は画面を持たないため，各画面に相当する操作を
 
 ```mermaid
 erDiagram
-    users ||--o{ notebooks : "作成する"
-    users ||--o{ cross_notebook_links : "所有する"
+    users ||--o{ maps : "作成する"
+    users ||--o{ nodes : "所有する"
     users ||--o{ api_tokens : "発行する"
-    notebooks ||--o{ syllabus_nodes : "含む"
-    notebooks ||--o{ assessment_questions : "含む"
-    syllabus_nodes ||--o{ syllabus_nodes : "親子(ドリルダウン)"
-    syllabus_nodes ||--o{ syllabus_nodes : "サブクエストの紐付け先"
-    syllabus_nodes ||--o{ syllabus_edges : "前提(from)"
-    syllabus_nodes ||--o{ syllabus_edges : "後続(to)"
-    syllabus_nodes ||--o| progress_statuses : "進捗"
-    syllabus_nodes ||--o{ cross_notebook_links : "source"
-    syllabus_nodes ||--o{ cross_notebook_links : "target"
+    maps ||--o{ map_nodes : "メインノードを置く"
+    maps ||--o{ map_paths : "道を持つ"
+    maps ||--o{ assessment_questions : "含む"
+    nodes ||--o{ map_nodes : "置かれる"
+    nodes ||--o{ map_paths : "道(from/to)"
+    nodes ||--o{ sub_nodes : "サブノードを持つ(node/sub_node)"
+    nodes ||--o{ sub_node_paths : "道(from/to)"
+    nodes ||--o| progress_statuses : "進捗"
+    nodes |o--o| maps : "元ノード(origin_node_id)"
+    nodes |o--o{ maps : "現在地(current_node_id)"
+    map_nodes ||--o| detours : "寄り道の出発点"
+    detours |o--o| maps : "寄り道から作ったマップ"
+    maps |o--o{ progress_statuses : "始めたマップ"
     assessment_questions ||--o| assessment_answers : "回答"
-    syllabus_nodes |o--o{ assessment_answers : "既習判定の対象"
+    nodes |o--o{ assessment_answers : "既習判定の対象"
 
     users {
         bigint id PK
@@ -188,34 +194,51 @@ erDiagram
         bigint id PK
         bigint user_id FK
     }
-    notebooks {
+    maps {
+        bigint id PK
+        bigint user_id FK
+        bigint current_node_id FK
+        bigint origin_node_id FK
+    }
+    nodes {
         bigint id PK
         bigint user_id FK
     }
-    syllabus_nodes {
+    map_nodes {
         bigint id PK
-        bigint notebook_id FK
-        bigint parent_node_id FK
-        bigint related_main_node_id FK
+        bigint map_id FK
+        bigint node_id FK
     }
-    syllabus_edges {
+    map_paths {
         bigint id PK
+        bigint map_id FK
         bigint from_node_id FK
         bigint to_node_id FK
+    }
+    sub_nodes {
+        bigint id PK
+        bigint node_id FK
+        bigint sub_node_id FK
+    }
+    sub_node_paths {
+        bigint id PK
+        bigint node_id FK
+        bigint from_node_id FK
+        bigint to_node_id FK
+    }
+    detours {
+        bigint id PK
+        bigint map_node_id FK
+        bigint spawned_map_id FK
     }
     progress_statuses {
         bigint id PK
         bigint node_id FK
-    }
-    cross_notebook_links {
-        bigint id PK
-        bigint user_id FK
-        bigint source_node_id FK
-        bigint target_node_id FK
+        bigint started_map_id FK
     }
     assessment_questions {
         bigint id PK
-        bigint notebook_id FK
+        bigint map_id FK
     }
     assessment_answers {
         bigint id PK
@@ -230,34 +253,36 @@ erDiagram
 | :--- | :--- | :--- |
 | `users` | ユーザー情報と認証 | — |
 | `api_tokens` | CLI 用の認証トークン（ハッシュ値のみ保持） | F-014 |
-| `notebooks` | 学習テーマごとの作業スペース．ゴール・難易度・生成状態を持つ | F-001〜F-003，F-012 |
-| `syllabus_nodes` | シラバスのノード（学習マップ上の地点） | F-006，F-007，F-011，F-013 |
-| `syllabus_edges` | ノード間の前提関係（学習マップ上の道）．同一ノートブック内のみ | F-011，F-013 |
-| `progress_statuses` | ノードごとの進捗．現在地とコンパスの決定に使う | F-010，F-013 |
-| `cross_notebook_links` | 他ノートブックのノードとの関連の提案・承認状態 | 4.2.7（Design Doc） |
+| `maps` | ゴールごとの作業スペース．ゴール・難易度・生成状態・現在地・元ノードを持つ | F-001〜F-003，F-012，F-013，F-017 |
+| `nodes` | ノードの内容（タイトル・概要）．ユーザーの持ち物で，複数のマップに登場できる | F-011，F-015 |
+| `map_nodes` | マップに置かれたメインノードと，そのマップでの重要度 | F-011，F-013，F-015 |
+| `map_paths` | マップごとのメインノード間の道 | F-011，F-013 |
+| `sub_nodes` | ノードとそのサブノードの関係（マップ間で共有） | F-007，F-016 |
+| `sub_node_paths` | 同じノードの中のサブノード間の道（マップ間で共有） | F-007 |
+| `detours` | メインノードごとの寄り道と，そこから作ったマップ | F-006 |
+| `progress_statuses` | ノードごとの進捗（マップ間で共有）と，学習を始めたマップ | F-010，F-013，F-015 |
 | `assessment_questions` / `assessment_answers` | 前提知識アセスメントの質問と回答 | F-004 |
 
 ---
 
 ## 5. 外部インターフェース設計
 
-### 5.1 シラバス生成API連携
+### 5.1 マップ生成API連携
 
-* ユーザーが確定した「ゴール」「難易度」「前提知識アセスメント結果」を基に，バックエンドが外部LLM APIへプロンプトを送信し，構造化されたシラバスJSONを生成する．
-* シラバス生成には数十秒を要する可能性があるため，**ストリーミング形式**でLLMのレスポンスを逐次受信し，生成された章・ノードから順にフロントエンドへ反映する．
+* ユーザーが確定した「ゴール」「難易度」「前提知識アセスメント結果」と，ユーザーの既存ノードの一覧を基に，バックエンドが外部LLM APIへプロンプトを送信し，構造化されたマップのデータ（JSON）を生成する．同じ内容のノードは新しく作らずに既存ノードを再利用させる．
+* マップ生成には数十秒を要する可能性があるため，**ストリーミング形式**でLLMのレスポンスを逐次受信し，生成されたノードから順にフロントエンドへ反映する．
 * バックエンドはストリーミングされたチャンクを解析し，ノード1件分のJSONが確定するたびに SSE（Server-Sent Events）でフロントエンドへ逐次配信する（Design Doc 4.3.2）．
 
-### 5.2 Embedding API連携
+### 5.2 Embedding API連携（v1.5.0 で廃止）
 
-* クロスノートブックのリンク提案機能のため，メインルートの `syllabus_nodes` 生成時にバックエンドが外部Embedding APIを呼び出し，各ノードの `embedding` を取得・保存する．
-* 新規ノード追加時，既存の他ノートブックのメインルートノードとコサイン類似度を計算し，一定の閾値（暫定0.80）を超えたペアを `cross_notebook_links`（status: proposed）として登録する．
+* クロスノートブックリンクの提案のために使っていたが，ノードをマップ間で共有する構成（ADR 0003）に変えたため廃止した．
 
 ### 5.3 APIキー管理方式
 
-* 外部LLM API・Embedding APIのキーは環境変数等によりバックエンド（Rails）側でのみ保持し，フロントエンドおよびCLIへは一切露出させない．
+* 外部LLM APIのキーは環境変数等によりバックエンド（Rails）側でのみ保持し，フロントエンドおよびCLIへは一切露出させない．
 * フロントエンドおよびCLIから外部APIへの直接リクエストは行わず，必ずバックエンドを経由する構成とする．
 
 ### 5.4 オプトアウト設定
 
-* 外部LLM API・Embedding APIへのリクエスト時には，送信データをAIモデルの学習に利用しない設定（オプトアウト）を必須パラメータとしてリクエストに含める．
+* 外部LLM APIへのリクエスト時には，送信データをAIモデルの学習に利用しない設定（オプトアウト）を必須パラメータとしてリクエストに含める．
 * ユーザーの自由記述入力（ゴール入力等）に個人情報・秘密情報が含まれた場合の漏洩リスクを低減する．
