@@ -68,7 +68,8 @@ sequenceDiagram
 The map is a DAG stored as relational node + path tables, not in a graph DB (`docs/design_doc.md` section 5.1). Nodes belong to the user and are shared across maps (ADR 0003):
 
 - Shared: `nodes` (title, summary), `sub_nodes` + `sub_node_paths` (a node's contents), `progress_statuses` (one progress per node, plus `started_map_id`).
-- Per map: `map_nodes` (which nodes are main nodes here, `importance_score`), `map_paths` (paths between main nodes), `detours` (max one per main node), `maps.current_node_id`, `maps.origin_node_id`.
+- Per map: `map_nodes` (which nodes are main nodes here, `importance_score`), `map_paths` (paths between main nodes), `detours` (max one per main node), `map_progress_events` (progress updates made from this map), `maps.origin_node_id`.
+- A main node may also appear inside another main node of the same map (ADR 0006); it is still placed at most once per map.
 
 Full table definitions: `docs/design_doc.md` section 4.1.2 (the source of truth; `docs/basic_design.md` section 4 is only an overview).
 
@@ -79,10 +80,10 @@ The map screen shows this graph as-is. There is **no linear roadmap view and no 
 The app's concept (and its name, Campass) is "spread out a map and check the compass": the map shows the whole graph for one goal, and a **compass** points from the learner's **current position** to **every node the learner can study now** (F-013, `docs/design_doc.md` section 4.2.8).
 
 - The "map" is a metaphor only. Nodes have no coordinates; the map is drawn as a network graph.
-- Current position is stored per map (`maps.current_node_id`): the main node last started or completed in that map; `null` is the start point.
+- Current position is derived per map from `map_progress_events` (ADR 0005): the node of the latest start or completion made from that map, among nodes still placed there and not reset since; none is the start point. Removing that node or resetting it moves the position back.
 - Compass candidates are derived each time, never stored: unfinished main nodes that are not known nodes, whose incoming paths all come from nodes that are completed or known. A known node is in progress in another map (`started_map_id` is another map) or completed.
 - The compass guides; the learner may start any node, and completion is always the learner's decision (the system never auto-completes a node).
 
 ## Undecided
 
-Frontend auth and the details of F-016 / F-017 are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+Frontend auth, the details of F-016 / F-017, and shared edits while another map is generating are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.

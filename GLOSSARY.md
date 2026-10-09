@@ -15,7 +15,7 @@ A directed connection from one node to another that shows a recommended learning
 _Avoid_: 前提, prerequisite, 依存関係, dependency, エッジ, edge, 順路, 必須の前提, 補足の前提, supplementary
 
 **メインノード (Main node)**:
-A node at the top level of a given map, shown on the map screen from the start. The same node can be a main node in one map and a sub node in another.
+A node at the top level of a given map, shown on the map screen from the start. The same node can be a main node in one map and a sub node in another, and even inside another main node of the same map.
 _Avoid_: メインルート, main route, 大枠の地点
 
 **サブノード (Sub node)**:
