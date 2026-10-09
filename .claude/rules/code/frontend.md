@@ -48,7 +48,7 @@ graph TD
 ## Rules
 
 - **There is no linear roadmap view.** Do not build one, and do not sort nodes into a single order on the client.
-- **Render streamed nodes one at a time.** Move to S-03 as soon as the last assessment answer is sent. Each SSE `node` event carries one complete node; add it to state and draw it immediately. Reused nodes arrive already filled in (F-009). Show the compass only after `done`.
+- **Render streamed nodes one at a time.** Move to S-03 as soon as generation starts on S-02. Each SSE `node` event carries one complete node; add it to state and draw it immediately. Reused nodes arrive already filled in (F-009). Show the compass only after `done`.
 - **Map screen**: first draw only main nodes, with titles and paths only (no `summary` until a node is selected). Center the initial view on the current position and its surroundings. Selecting a node opens the detail panel (`GET /api/maps/:mapId/nodes/:nodeId`) and keeps the selection in `?node=`.
 - **Drill-down (F-007)**: fetch `GET /api/nodes/:id/sub_nodes` and expand the sub nodes as a graph inside that node. For an origin node, move to its map instead.
 - **Marks**: shared nodes get a "common with other maps" mark; origin nodes a "has a map inside" mark. A detour without a map appears only in the detail panel; once a map is made from it, draw a dashed dead-end entrance from its main node. Detour entrances have no progress.

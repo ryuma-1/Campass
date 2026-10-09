@@ -44,9 +44,6 @@ sequenceDiagram
     BE->>LLM: is the goal specific enough?
     LLM-->>BE: 3 goal candidates if vague (F-002)
     U->>FE: choose goal + difficulty (F-003)
-    FE->>BE: POST /api/maps/:id/assessment
-    BE->>LLM: generate 3-5 questions (F-004)
-    U->>FE: answer questions
     FE->>BE: POST /api/maps/:id/generation (SSE)
     BE->>DB: load the user's existing nodes
     BE->>LLM: generate map (streaming, JSON Schema, existing nodes to reuse)

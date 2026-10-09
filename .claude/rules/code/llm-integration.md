@@ -10,7 +10,7 @@ Rules for code that calls the LLM API. Based on `docs/design_doc.md` sections 4.
 ## Structured output
 
 - Map generation must use JSON Schema structured output (or tool calling) so the response format is enforced. Do not parse free-form text.
-- Each main node has `ref`, `existing_node_id` (reuse) or `title` + `summary` (new), `from` (incoming paths), `importance_score` (0–1, used to highlight compass candidates), `skip_recommended`, nested `sub_nodes`, and `detour` (or `null`). Full schema: `docs/design_doc.md` section 4.2.4.
+- Each main node has `ref`, `existing_node_id` (reuse) or `title` + `summary` (new), `from` (incoming paths), `importance_score` (0–1, used to highlight compass candidates), nested `sub_nodes`, and `detour` (or `null`). Full schema: `docs/design_doc.md` section 4.2.4.
 - The prompt includes the user's existing nodes (IDs, titles, sub node IDs) so the LLM reuses them. Send only the current user's nodes.
 - If parsing fails, retry at most 2 times in the backend.
 
