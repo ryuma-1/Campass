@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: 生成ジョブの仕組み (Q4)</title>
+<style>
+  :root { --accent:#2f6fde; --fg:#1d2330; --muted:#6b7280; --line:#e3e6ec; --bg:#fafbfc; --warn:#b7791f; --bad:#c53030; --ok:#2f855a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 80px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:28px 0 10px; }
+  .badge { display:inline-block; font-size:12px; padding:1px 8px; border-radius:99px; background:#fde68a; color:#7c5a00; margin-left:8px; vertical-align:middle; }
+  .intro { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px 16px; color:#333; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; font-size:14px; padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.primary:hover:not(:disabled) { color:#fff; opacity:.9; }
+  .seg button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .card h3 { margin:0 0 8px; font-size:14px; color:var(--muted); font-weight:600; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; }
+  dt { color:var(--muted); }
+  dd { margin:0; font-weight:600; }
+  .changed { background:#fff3c4; border-radius:3px; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); background:#f4f6f9; }
+  .chip.stale { border-color:var(--bad); color:var(--bad); background:#fff5f5; }
+  .log { max-height:300px; overflow:auto; font-size:13px; }
+  .log div { padding:3px 0; border-bottom:1px dashed var(--line); }
+  .log .latest { background:#eef4ff; }
+  .who { display:inline-block; min-width:76px; color:var(--muted); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid var(--line); }
+  .tabs button { border-radius:6px 6px 0 0; border-bottom:none; }
+  .tabs button.on { background:#fff; color:var(--accent); border-color:var(--accent); }
+  .tabpanel { background:#fff; border:1px solid var(--line); border-top:none; padding:12px 16px; border-radius:0 0 8px 8px; }
+  .steps { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  .steps button { text-align:left; }
+  .steps button.done { color:var(--ok); border-color:#c6f6d5; }
+  table { border-collapse:collapse; width:100%; background:#fff; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#f4f6f9; }
+  .note { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>生成ジョブの仕組みを選ぶ (#5 / Q4)<span class="badge">PROTOTYPE・使い捨て</span></h1>
+  <div class="intro">
+    <p style="margin:0 0 6px"><b>問い：</b>マップ生成をリクエストから切り離して最後まで続けるとき，どの仕組みでジョブを動かすか．
+    候補は <b>ActiveJob :async</b>（Rails 標準・プロセス内）・<b>Thread.new</b>（素のスレッド）・<b>Solid Queue</b>（DB に積むキュー・gem 追加が必要）の3つ．</p>
+    <p style="margin:0" class="note">#5 で決めたルール（SSE は DB から読む，ハートビート 5分で <code>timed_out</code>，削除は <code>maps</code> 行ロック，終了イベント <code>done</code>/<code>error</code>/<code>deleted</code>）はそのまま入れてある．
+    違いが出るのは主に「生成中にサーバーが再起動したとき」．Rails の実挙動ではなく，設計判断用の単純化したシミュレーション．</p>
+  </div>
+
+  <h2>仕組み</h2>
+  <div class="row seg" id="mech"></div>
+  <div class="row seg" id="policy" style="margin-top:8px"></div>
+
+  <h2>いまの状態</h2>
+  <div class="grid" id="state"></div>
+
+  <h2>自由に操作する</h2>
+  <div class="row" id="free"></div>
+
+  <h2>シナリオ</h2>
+  <div class="tabs" id="tabs"></div>
+  <div class="tabpanel" id="tabpanel"></div>
+
+  <h2>出来事（新しい順）</h2>
+  <div class="card log" id="log"></div>
+
+  <h2>比較表（シミュレーション外の事実）</h2>
+  <table>
+    <tr><th></th><th>ActiveJob :async</th><th>Thread.new</th><th>Solid Queue</th></tr>
+    <tr><td>新しい gem</td><td>不要（Rails 標準）</td><td>不要</td><td><code>solid_queue</code> が必要（承認が要る）．Ruby 4.0.5 / Rails 7.1 で動くかは要確認</td></tr>
+    <tr><td>追加のプロセス</td><td>なし（web の中で動く）</td><td>なし</td><td>ワーカー（<code>bin/jobs</code>）か Puma プラグイン．Compose にサービスかプロセスを足す</td></tr>
+    <tr><td>DB</td><td>変更なし</td><td>変更なし</td><td>キュー用テーブルが増える（MySQL 8 で可）</td></tr>
+    <tr><td>再起動・デプロイ時</td><td>実行中ジョブは消える → ハートビートで <code>timed_out</code></td><td>同左</td><td>ジョブはキューに戻り再実行される → 再実行で何をするかを決める必要あり</td></tr>
+    <tr><td>Rails との統合</td><td>DB 接続の返却などは ActiveJob がやる．<code>retry_on</code>/<code>discard_on</code> が使える</td><td>自前で <code>Rails.application.executor.wrap</code> と接続管理が必要</td><td>ActiveJob 経由なので :async と同じコードで動く</td></tr>
+    <tr><td>後から乗り換え</td><td><code>config.active_job.queue_adapter</code> を変えるだけで Solid Queue へ</td><td>ジョブを書き直し</td><td>—</td></tr>
+  </table>
+</main>
+
+<script>
+/* ===== Portable logic module: no DOM below this line until the page section ===== */
+const GenerationSim = (() => {
+  // A map plan has 5 main nodes; the 5th completes the map.
+  const PLANNED = 5;
+  const HEARTBEAT_LIMIT_MIN = 5;
+  const TITLES = ["変数と型", "制御構文", "関数", "配列とハッシュ", "クラス", "モジュール", "例外", "テスト", "ファイル入出力", "正規表現"];
+
+  /** Builds a fresh world for a mechanism. rerunPolicy matters only for Solid Queue. */
+  function initial(mechanism, rerunPolicy) {
+    return {
+      mechanism, rerunPolicy,
+      clock: 0,
+      nextNodeId: 101,
+      map: { exists: true, status: "draft", errorCode: null, heartbeatAt: null, nodes: [] },
+      job: { status: "none", attempt: 0, emitted: 0 },
+      sse: { connected: false, sentIds: [], eventsReceived: 0, lastTerminal: null },
+      client: { open: true, nodes: {}, notice: null },
+      events: [],
+    };
+  }
+
+  function log(s, who, text) { s.events.push({ t: s.clock, who, text }); }
+
+  function isAsyncLike(s) { return s.mechanism !== "solid_queue"; }
+
+  /** Lazy heartbeat check, run by the SSE loop and by read APIs. */
+  function checkHeartbeat(s, by) {
+    const m = s.map;
+    if (m.exists && m.status === "generating" && s.clock - m.heartbeatAt >= HEARTBEAT_LIMIT_MIN) {
+      m.status = "failed"; m.errorCode = "timed_out";
+      log(s, "DB", `${by}がハートビート切れ（${s.clock - m.heartbeatAt}分）を見つけて failed / timed_out にした`);
+    }
+  }
+
+  /** Solid Queue worker picks a queued job. A re-run cannot resume a half-read LLM stream. */
+  function runQueued(s) {
+    if (s.mechanism !== "solid_queue" || s.job.status !== "queued") return;
+    s.job.status = "running";
+    log(s, "ワーカー", `ジョブを取り出して実行（${s.job.attempt}回目）`);
+    if (!s.map.exists) { s.job.status = "finished"; log(s, "ジョブ", "マップが無いので何もせず終了"); return; }
+    if (s.job.attempt === 1) return;
+    if (s.map.status !== "generating") { s.job.status = "finished"; log(s, "ジョブ", `マップがすでに ${s.map.status} なので何もせず終了`); return; }
+    if (s.rerunPolicy === "fail") {
+      s.map.status = "failed"; s.map.errorCode = "interrupted"; s.job.status = "failed";
+      log(s, "ジョブ", "再実行と分かったので途中再開せず failed / interrupted にした（ハートビートより早く分かる）");
+    } else {
+      const n = s.map.nodes.length;
+      s.map.nodes = []; s.job.emitted = 0; s.map.heartbeatAt = s.clock;
+      log(s, "ジョブ", `再実行なので保存済みノード ${n} 個を消して LLM に最初から頼み直す（LLM の出力は前回と同じとは限らない）`);
+    }
+  }
+
+  /** One pass of the SSE tail loop: replay/tail nodes from DB, then send a terminal event. */
+  function pumpSse(s) {
+    if (!s.sse.connected) return;
+    checkHeartbeat(s, "SSE ループ");
+    const close = (ev, text) => {
+      s.sse.connected = false; s.sse.lastTerminal = ev;
+      log(s, "SSE", text);
+    };
+    if (!s.map.exists) { close("deleted", "deleted を送って閉じた"); s.client.notice = "別の場所で削除された → S-01 へ"; return; }
+    for (const n of s.map.nodes) {
+      if (s.sse.sentIds.includes(n.id)) continue;
+      s.sse.sentIds.push(n.id); s.sse.eventsReceived++;
+      // Client upserts by node id, so replays never duplicate on screen.
+      s.client.nodes[n.id] = n.title;
+      log(s, "SSE", `node #${n.id}「${n.title}」を送信`);
+    }
+    if (s.map.status === "ready") close("done", "done を送って閉じた（コンパスを表示）");
+    else if (s.map.status === "failed") close("error", `error（${s.map.errorCode}）を送って閉じた`);
+  }
+
+  function pump(s) { runQueued(s); pumpSse(s); }
+
+  /** Opens a fresh SSE connection (GET /generation); the server replays every saved node. */
+  function connect(s, resetClient) {
+    if (resetClient) s.client.nodes = {};
+    s.sse.connected = true; s.sse.sentIds = []; s.sse.lastTerminal = null;
+  }
+
+  const actions = {
+    start(s) {
+      if (!s.map.exists) { log(s, "API", "マップが無い → 404"); return; }
+      if (s.map.status === "generating") { log(s, "API", "POST /generation → 409（すでに生成中）"); return; }
+      if (s.map.status !== "draft") { log(s, "API", `POST /generation → 409（status が ${s.map.status}）`); return; }
+      s.map.status = "generating"; s.map.heartbeatAt = s.clock;
+      s.job = { status: isAsyncLike(s) ? "running" : "queued", attempt: 1, emitted: 0 };
+      log(s, "API", `POST /generation → 202．${isAsyncLike(s) ? "web プロセス内でジョブ開始" : "キューに積んだ"}`);
+      connect(s, true);
+      log(s, "画面", "S-03 へ移動して GET /generation（SSE）に接続");
+    },
+    llmNode(s) {
+      if (s.job.status !== "running") {
+        log(s, "LLM", s.job.status === "lost"
+          ? "LLM との接続は再起動で切れているので，何も届かない"
+          : "LLM とつながっているジョブが無いので何も起きない");
+        return;
+      }
+      // Each node save takes the maps row lock first (Q14).
+      if (!s.map.exists) { s.job.status = "stopped"; log(s, "ジョブ", "ロックを取ったらマップが無い → LLM ストリームを閉じて静かに終了"); return; }
+      if (s.map.status !== "generating") { s.job.status = "stopped"; log(s, "ジョブ", `ロックを取ったら status が ${s.map.status} → 保存せず終了`); return; }
+      const node = { id: s.nextNodeId++, title: TITLES[(s.nextNodeId - 102) % TITLES.length] };
+      s.map.nodes.push(node); s.job.emitted++; s.map.heartbeatAt = s.clock;
+      log(s, "ジョブ", `ノード #${node.id}「${node.title}」を保存，ハートビート更新（${s.job.emitted}/${PLANNED}）`);
+      if (s.job.emitted >= PLANNED) { s.map.status = "ready"; s.job.status = "finished"; log(s, "ジョブ", "全ノード保存 → ready"); }
+    },
+    llmError(s) {
+      if (s.job.status !== "running") { log(s, "LLM", "LLM とつながっているジョブが無いので何も起きない"); return; }
+      s.job.status = "failed";
+      if (s.map.exists && s.map.status === "generating") { s.map.status = "failed"; s.map.errorCode = "llm_error"; }
+      log(s, "ジョブ", "リトライ 2 回でも失敗 → rescue して failed / llm_error を保存");
+    },
+    blip(s) {
+      if (!s.sse.connected) { log(s, "画面", "SSE はつながっていない"); return; }
+      log(s, "画面", "通信が一瞬切れた → EventSource が自動で再接続（画面の状態はそのまま）");
+      connect(s, false);
+    },
+    leave(s) {
+      s.sse.connected = false; s.client = { open: false, nodes: {}, notice: null };
+      log(s, "画面", "ページを離れた（SSE 切断）．ジョブはそのまま続く");
+    },
+    reopen(s) {
+      s.client.open = true; s.client.notice = null;
+      checkHeartbeat(s, "GET /maps/:id");
+      if (!s.map.exists) { s.client.nodes = {}; log(s, "画面", "S-03 を開いたら 404 → S-01 へ"); return; }
+      if (s.map.status === "generating") { connect(s, true); log(s, "画面", "S-03 を開いた．generating なので GET /generation に接続"); }
+      else { s.client.nodes = Object.fromEntries(s.map.nodes.map(n => [n.id, n.title])); log(s, "画面", `S-03 を開いた．status ${s.map.status} なので保存済みノードを表示（SSE なし）`); }
+    },
+    restart(s) {
+      const wasConnected = s.sse.connected;
+      s.sse.connected = false;
+      log(s, "サーバー", `デプロイで再起動${wasConnected ? "（SSE も切れる）" : ""}`);
+      if (s.job.status === "running") {
+        if (isAsyncLike(s)) { s.job.status = "lost"; log(s, "ジョブ", "メモリ上にしか無かったので消えた．DB の status は generating のまま"); }
+        else { s.job.status = "queued"; s.job.attempt++; log(s, "ワーカー", "実行中だったジョブをキューに戻した"); }
+      }
+      if (wasConnected) { connect(s, false); log(s, "画面", "EventSource が新しいプロセスに自動で再接続"); }
+    },
+    deleteMap(s) {
+      if (!s.map.exists) { log(s, "API", "すでに無い"); return; }
+      s.map.exists = false; s.map.nodes = [];
+      log(s, "API", "DELETE /maps/:id（maps 行をロックして削除）");
+      if (s.client.open && s.sse.connected) s.client.ownDelete = false;
+    },
+    plus1(s) { s.clock += 1; log(s, "時計", "1分経過"); },
+    plus5(s) { s.clock += 5; log(s, "時計", "5分経過"); },
+    listMaps(s) {
+      checkHeartbeat(s, "GET /maps");
+      log(s, "画面", `S-01 を開いた：${s.map.exists ? `このマップは ${s.map.status}` : "このマップは一覧に無い"}`);
+    },
+  };
+
+  /** Pure step: returns a new world after one action and one pump. */
+  function step(state, action) {
+    const s = structuredClone(state);
+    const before = s.events.length;
+    actions[action](s);
+    pump(s);
+    s.lastEventIndex = before;
+    return s;
+  }
+
+  return { initial, step, PLANNED, HEARTBEAT_LIMIT_MIN };
+})();
+
+/* ===== Page shell (throwaway) ===== */
+const LABELS = {
+  start: "生成を開始する（S-02 で最後の回答）",
+  llmNode: "LLM の返事が 1 ノード分進む",
+  llmError: "LLM が失敗し続ける",
+  blip: "通信が一瞬切れる",
+  leave: "ページを離れる",
+  reopen: "S-03 を開き直す",
+  restart: "サーバー再起動（デプロイ）",
+  deleteMap: "このマップを削除（別タブ / CLI）",
+  plus1: "1分進める",
+  plus5: "5分進める",
+  listMaps: "S-01 マップ一覧を開く",
+};
+const MECHS = { async: "ActiveJob :async", thread: "Thread.new", solid_queue: "Solid Queue" };
+const POLICIES = { fail: "再実行時：failed にする", restart: "再実行時：最初からやり直す" };
+
+const SCENARIOS = [
+  { name: "正常系", desc: "生成中にページを離れても，ジョブは最後まで続く．戻ると保存済みノードが全部見える．", steps: ["start", "llmNode", "llmNode", "leave", "llmNode", "llmNode", "reopen", "llmNode"] },
+  { name: "通信の瞬断", desc: "EventSource が自動再接続すると，サーバーは保存済みノードを全部送り直す．画面はノード ID で上書きするので重複しない．「受信イベント数」と「画面のノード数」を比べる．", steps: ["start", "llmNode", "llmNode", "blip", "llmNode", "blip", "llmNode", "llmNode"] },
+  { name: "生成中にデプロイ ★", desc: "Q4 の本題．仕組みを切り替えて同じ手順を試す．:async / Thread は 5 分後に timed_out．Solid Queue は再実行の方針で結果が変わる（「最初からやり直す」では画面に古いノードが残るのに注目）．", steps: ["start", "llmNode", "llmNode", "restart", "llmNode", "llmNode", "llmNode", "llmNode", "llmNode", "plus5"] },
+  { name: "生成中に削除", desc: "別タブで削除すると，SSE は deleted を送って閉じ，ジョブは次のノード保存で気づいて静かに終わる．", steps: ["start", "llmNode", "deleteMap", "llmNode"] },
+  { name: "LLM が遅い", desc: "ノードとノードの間に 5 分以上かかると，ジョブは生きているのに timed_out になる．その後ジョブがノードを保存しようとしたらどうなるか．", steps: ["start", "llmNode", "plus5", "llmNode"] },
+  { name: "二重開始", desc: "生成中に別タブからもう一度生成を始めようとすると 409．", steps: ["start", "start", "llmNode"] },
+];
+
+let mechanism = "async", policy = "fail";
+let state = GenerationSim.initial(mechanism, policy);
+let prev = state;
+let activeTab = 0, stepIndex = 0;
+
+function dispatch(action) { prev = state; state = GenerationSim.step(state, action); render(); }
+function reset() { prev = state = GenerationSim.initial(mechanism, policy); stepIndex = 0; render(); }
+
+function field(label, value, prevValue, cls = "") {
+  const changed = JSON.stringify(value) !== JSON.stringify(prevValue);
+  return `<dt>${label}</dt><dd class="${cls} ${changed ? "changed" : ""}">${value}</dd>`;
+}
+function statusCls(st) { return { ready: "ok", failed: "warn", generating: "", draft: "" }[st] ?? ""; }
+function jobLabel(j) { return { none: "なし", queued: "キュー待ち", running: "実行中", lost: "消えた", stopped: "途中で終了", finished: "終了", failed: "失敗" }[j]; }
+
+function render() {
+  document.getElementById("mech").innerHTML = Object.entries(MECHS).map(([k, v]) =>
+    `<button class="${k === mechanism ? "on" : ""}" onclick="mechanism='${k}';reset()">${v}</button>`).join("");
+  document.getElementById("policy").innerHTML = mechanism === "solid_queue"
+    ? Object.entries(POLICIES).map(([k, v]) => `<button class="${k === policy ? "on" : ""}" onclick="policy='${k}';reset()">${v}</button>`).join("")
+    : "";
+
+  const s = state, p = prev, m = s.map, pm = p.map;
+  const serverIds = new Set(m.nodes.map(n => n.id));
+  const clientChips = Object.entries(s.client.nodes).map(([id, t]) =>
+    `<span class="chip ${serverIds.has(+id) ? "" : "stale"}">#${id} ${t}</span>`).join("") || `<span class="note">なし</span>`;
+  const stale = Object.keys(s.client.nodes).filter(id => !serverIds.has(+id)).length;
+  const hbAge = m.heartbeatAt === null ? "—" : `${s.clock - m.heartbeatAt}分前`;
+
+  document.getElementById("state").innerHTML = `
+    <div class="card"><h3>マップ（DB）</h3><dl>
+      ${field("存在", m.exists ? "あり" : "削除済み", pm.exists ? "あり" : "削除済み", m.exists ? "" : "bad")}
+      ${field("status", m.status, pm.status, statusCls(m.status))}
+      ${field("エラーコード", m.errorCode ?? "—", pm.errorCode ?? "—")}
+      ${field("ハートビート", hbAge, pm.heartbeatAt === null ? "—" : `${p.clock - pm.heartbeatAt}分前`)}
+      ${field("保存済みノード", `${m.nodes.length} / ${GenerationSim.PLANNED}`, `${pm.nodes.length} / ${GenerationSim.PLANNED}`)}
+    </dl></div>
+    <div class="card"><h3>ジョブ（${MECHS[s.mechanism]}）</h3><dl>
+      ${field("状態", jobLabel(s.job.status), jobLabel(p.job.status), s.job.status === "lost" ? "bad" : "")}
+      ${field("実行回数", s.job.attempt, p.job.attempt)}
+      ${field("LLM から受信", `${s.job.emitted} ノード`, `${p.job.emitted} ノード`)}
+      ${field("時計", `${s.clock}分`, `${p.clock}分`)}
+    </dl></div>
+    <div class="card"><h3>画面（S-03）</h3><dl>
+      ${field("SSE", s.sse.connected ? "接続中" : "切断", p.sse.connected ? "接続中" : "切断")}
+      ${field("最後の終了イベント", s.sse.lastTerminal ?? "—", p.sse.lastTerminal ?? "—")}
+      ${field("受信イベント数", s.sse.eventsReceived, p.sse.eventsReceived)}
+      ${field("画面のノード数", Object.keys(s.client.nodes).length, Object.keys(p.client.nodes).length)}
+      ${field("通知", s.client.notice ?? "—", p.client.notice ?? "—")}
+    </dl>
+    <div class="chips" style="margin-top:8px">${clientChips}</div>
+    ${stale ? `<p class="bad" style="margin:6px 0 0;font-size:13px">サーバーに無いノードが ${stale} 個画面に残っている（上書きでは消えない）</p>` : ""}
+    </div>`;
+
+  document.getElementById("free").innerHTML = Object.entries(LABELS).map(([k, v]) =>
+    `<button onclick="dispatch('${k}')">${v}</button>`).join("") + `<button onclick="reset()">リセット</button>`;
+
+  document.getElementById("tabs").innerHTML = SCENARIOS.map((sc, i) =>
+    `<button class="${i === activeTab ? "on" : ""}" onclick="activeTab=${i};reset()">${sc.name}</button>`).join("");
+  const sc = SCENARIOS[activeTab];
+  document.getElementById("tabpanel").innerHTML = `<p style="margin:0">${sc.desc}</p>
+    <p class="note" style="margin:4px 0 0">タブを選ぶと初期状態に戻る．上で仕組みを切り替えても戻る．</p>
+    <div class="steps">${sc.steps.map((a, i) =>
+      `<button class="${i < stepIndex ? "done" : i === stepIndex ? "primary" : ""}" ${i === stepIndex ? "" : "disabled"} onclick="stepIndex++;dispatch('${a}')">${i + 1}. ${LABELS[a]}</button>`).join("")}</div>`;
+
+  const ev = s.events.map((e, i) => ({ ...e, latest: i >= (s.lastEventIndex ?? 0) })).reverse();
+  document.getElementById("log").innerHTML = ev.map(e =>
+    `<div class="${e.latest ? "latest" : ""}"><span class="who">${e.t}分 ${e.who}</span>${e.text}</div>`).join("") || `<span class="note">まだ何も起きていない</span>`;
+}
+render();
+</script>
+</body>
+</html>
