@@ -40,10 +40,17 @@ graph LR
     B --> C{Valid?}
     C -->|yes| D[Save node or reuse existing,<br/>map_nodes / paths / sub_nodes / detour]
     C -->|no| R[Retry request, max 2] --> A
-    D --> F[Send one SSE node event]
-    F --> A
+    D --> A
     A -->|stream ends| G[Mark map ready]
+    D -.->|read from DB| F[SSE: one node event per saved node]
 ```
+
+The pipeline runs in a background job (ActiveJob `:async`) started by `POST /api/maps`, not in the SSE request, so it continues when the client disconnects (`docs/design_doc.md` section 4.2.9, ADR 0004):
+
+- Save one node per transaction. Lock the `maps` row first (`SELECT … FOR UPDATE`); if the map is gone, close the LLM stream, log, and stop quietly; if it is no longer `generating`, stop without saving. Update `maps.generation_heartbeat_at` after each save.
+- On an exception, set `status = failed` and `generation_error_code`. Log the details; never store the exception message.
+- A `generating` map whose heartbeat is older than the limit (5 minutes to start with) is set to `failed` / `timed_out` by the SSE loop and by map-reading APIs.
+- The SSE controller never receives nodes from the job. On every connection it sends all saved nodes, then polls the DB for new ones, and ends with `done`, `error` or `deleted`.
 
 See `llm-integration.md` for LLM call rules and `../meta/error.md` for failure handling.
 
@@ -53,11 +60,11 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 
 | Endpoint | Purpose |
 | :--- | :--- |
-| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `POST` takes `origin_node_id` or `detour_id` (F-017, F-006). |
-| `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map / preview what deletion affects. |
-| `POST /api/maps/:id/goal_suggestions` | Goal candidates for vague input (F-002). |
-| `POST /api/maps/:id/generation` (SSE) | Start streaming generation; one `node` event per node, then `done` or `error` (F-011). |
-| `GET /api/maps/:id` | Main nodes, paths, detour entrances, origin links, and `compass`. |
+| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `POST` takes the goal, difficulty, and `origin_node_id` or `detour_id` (F-017, F-006), creates the map as `generating` and starts the generation job (F-011). |
+| `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map (also while `generating`; locks the `maps` row first) / preview what deletion affects. |
+| `POST /api/goal_suggestions` | Goal candidates for vague input (F-002). Called before the map exists. |
+| `GET /api/maps/:id/generation` (SSE) | Watch generation (F-011): all saved nodes as `node` events, then new ones, then `done`, `error` or `deleted`. Reconnectable; no `Last-Event-ID`. |
+| `GET /api/maps/:id` | `status` and `error`, main nodes, paths, detour entrances, origin links, and `compass` (only when `ready`). |
 | `GET /api/maps/:mapId/nodes/:nodeId` | Node detail: summary, progress, this map's detour, other maps it appears in. |
 | `GET /api/nodes/:id/sub_nodes` | Drill-down (F-007): sub nodes and the paths among them (shared, no map). |
 | `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | Update progress (F-010); updates the map's current position and `started_map_id`; returns `compass` and `origin_completion_suggestion`. |

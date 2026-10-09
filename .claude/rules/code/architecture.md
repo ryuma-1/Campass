@@ -28,6 +28,7 @@ graph LR
 
 - The frontend talks only to the backend. Only the backend calls the LLM API and holds its key.
 - Map generation is streamed: LLM tokens → backend buffers until one node is complete → save to DB → one SSE event to the frontend.
+- Generation runs as a background job (ActiveJob `:async`), detached from the request, and continues when the client disconnects. The job only writes to the DB; the SSE endpoint reads saved nodes from the DB, so it can be reconnected any time (`docs/design_doc.md` section 4.2.9, ADR 0004).
 
 ## Main flow (design_doc 3.2)
 
@@ -40,19 +41,21 @@ sequenceDiagram
     participant DB as MySQL
 
     U->>FE: free-text interest (F-001)
-    FE->>BE: POST /api/maps/:id/goal_suggestions
+    FE->>BE: POST /api/goal_suggestions
     BE->>LLM: is the goal specific enough?
     LLM-->>BE: 3 goal candidates if vague (F-002)
     U->>FE: choose goal + difficulty (F-003)
-    FE->>BE: POST /api/maps/:id/generation (SSE)
+    FE->>BE: POST /api/maps (create map + start generation job)
+    FE->>BE: GET /api/maps/:id/generation (SSE, reconnectable)
     BE->>DB: load the user's existing nodes
     BE->>LLM: generate map (streaming, JSON Schema, existing nodes to reuse)
     loop each completed node
         LLM-->>BE: tokens
         BE->>DB: save node / map_nodes / paths / sub_nodes / detour
-        BE-->>FE: SSE node event
+        BE-->>FE: SSE node event (read from DB)
     end
     BE->>DB: mark map ready
+    BE-->>FE: SSE done
     FE->>BE: GET /api/maps/:id
     BE-->>FE: main nodes + paths + compass
     U->>FE: pick a compass candidate, update progress
@@ -82,4 +85,4 @@ The app's concept (and its name, Campass) is "spread out a map and check the com
 
 ## Undecided
 
-What happens when a user leaves during generation, frontend auth, and the details of F-016 / F-017 are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+Frontend auth and the details of F-016 / F-017 are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
