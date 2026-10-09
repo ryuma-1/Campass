@@ -16,9 +16,9 @@ Rules for code that calls the LLM API. Based on `docs/design_doc.md` sections 4.
 
 ## Streaming
 
-- The backend reads the LLM token stream and buffers it until one node's JSON is complete. It then saves that node to the DB and sends it to the frontend as one SSE event.
+- The backend reads the LLM token stream and buffers it until one node's JSON is complete. It then saves that node to the DB; the SSE endpoint reads saved nodes from the DB and sends each as one event.
 - Never forward partial token fragments to the frontend.
-- What happens to the generation when the user leaves mid-stream is still undecided (`docs/design_doc.md` section 9).
+- Generation runs in a background job and continues when the user leaves or the CLI is stopped (`docs/design_doc.md` section 4.2.9, ADR 0004). There is no cancel; deleting the map stops the job.
 
 ## Prompt safety
 
