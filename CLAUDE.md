@@ -9,7 +9,7 @@ Campass is a learning-path recommendation app. The user enters a goal, an LLM ge
 ## Source of Truth
 
 - `GLOSSARY.md` — domain terms; use them in code, docs and UI text. `docs/adr/` records why the model is shaped this way.
-- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-017` (F-005 and F-008 are 廃止) are used across all docs.
+- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-017` (F-004, F-005 and F-008 are 廃止) are used across all docs.
 - `docs/basic_design.md` — system layout, screens, DB overview (ER diagram only), external API integration.
 - `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API, alternatives considered, test plan, open issues (section 9).
 

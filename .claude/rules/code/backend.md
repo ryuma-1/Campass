@@ -56,7 +56,6 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 | `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `POST` takes `origin_node_id` or `detour_id` (F-017, F-006). |
 | `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map / preview what deletion affects. |
 | `POST /api/maps/:id/goal_suggestions` | Goal candidates for vague input (F-002). |
-| `POST /api/maps/:id/assessment` | Get / answer prerequisite questions (F-004). |
 | `POST /api/maps/:id/generation` (SSE) | Start streaming generation; one `node` event per node, then `done` or `error` (F-011). |
 | `GET /api/maps/:id` | Main nodes, paths, detour entrances, origin links, and `compass`. |
 | `GET /api/maps/:mapId/nodes/:nodeId` | Node detail: summary, progress, this map's detour, other maps it appears in. |
