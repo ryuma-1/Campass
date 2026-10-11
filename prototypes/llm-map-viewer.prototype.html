@@ -1,0 +1,257 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway viewer for llm-map-generation.prototype.rb output. Not production. -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM マップ生成ビューア（プロトタイプ）</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d9de;
+    --accent: #2f6fde; --accent-soft: #e6eefc; --err: #c4352b; --warn: #b7791f; --ok: #2e7d4f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --panel: #1f1f22; --ink: #ececef; --muted: #9a9aa2; --line: #36363c;
+      --accent: #6d9bf1; --accent-soft: #23314d; --err: #ef6b61; --warn: #e0a64a; --ok: #5cbf86;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 system-ui, -apple-system, "Hiragino Sans", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 24px; text-align: center; color: var(--muted); }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  .stat .v { font-size: 16px; font-weight: 600; }
+  ul.msgs { margin: 0; padding-left: 18px; }
+  .err { color: var(--err); } .warn { color: var(--warn); } .ok { color: var(--ok); }
+  .graph-wrap { overflow-x: auto; }
+  svg { display: block; }
+  .node-box { border: 1.5px solid var(--line); border-radius: 8px; background: var(--panel); height: 100%; padding: 6px 8px;
+              font-size: 12px; line-height: 1.35; cursor: pointer; overflow: hidden; color: var(--ink); }
+  .node-box.reused { border-color: var(--accent); }
+  .node-box.sel { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+  .node-box .t { font-weight: 600; }
+  .node-box .m { color: var(--muted); font-size: 11px; }
+  .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr) 360px; } }
+  .timeline .row { display: grid; grid-template-columns: 48px 1fr 56px; gap: 8px; align-items: center; font-size: 12px; }
+  .timeline .bar { height: 8px; background: var(--accent); border-radius: 4px; }
+  .muted { color: var(--muted); }
+  details summary { cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; background: var(--bg); padding: 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>LLM マップ生成ビューア <span class="muted" style="font-size:13px">プロトタイプ</span></h1>
+  <p class="lead">
+    確かめたいこと: Gemini に JSON Schema を渡してストリーミングで生成させたとき，
+    設計どおりのマップ（メインノード・道・サブノード・寄り道）が 1 ノードずつ届き，既存ノードを再利用し，検証を通るか．
+    <code>ruby prototypes/llm-map-generation.prototype.rb</code> が保存した JSON を読み込んでください．
+  </p>
+
+  <div class="card">
+    <div id="drop" class="drop">
+      JSON ファイルをここにドロップ，または <input type="file" id="file" accept=".json,application/json">
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <div class="card"><h2>概要</h2><div id="summary" class="grid"></div></div>
+    <div class="card"><h2>検証</h2><div id="validation"></div></div>
+    <div class="layout">
+      <div class="card"><h2>マップ（メインノードと道）</h2><div class="graph-wrap" id="graph"></div></div>
+      <div class="card"><h2>ノードの詳細</h2><div id="detail" class="muted">ノードを選ぶと要約・サブノード・寄り道が出ます．</div></div>
+    </div>
+    <div class="card timeline"><h2>ノードが届いた時刻（ストリーミング）</h2><div id="timeline"></div></div>
+  </div>
+</main>
+
+<script>
+/**
+ * Pure helpers: graph layout over nodes that point back via `from`.
+ * Layer = longest path from a node with no known incoming path.
+ */
+const MapLayout = {
+  /** Returns { ref: layerIndex } for the given nodes; unknown refs and cycles are ignored. */
+  layers(nodes) {
+    const byRef = new Map(nodes.map(n => [n.ref, n]));
+    const memo = new Map();
+    const visiting = new Set();
+    const depth = ref => {
+      if (memo.has(ref)) return memo.get(ref);
+      // A cycle should have been reported by the validator; break it here so drawing still works.
+      if (visiting.has(ref)) return 0;
+      visiting.add(ref);
+      const n = byRef.get(ref);
+      const d = Math.max(0, ...(n.from || []).filter(f => byRef.has(f)).map(f => depth(f) + 1));
+      visiting.delete(ref);
+      memo.set(ref, d);
+      return d;
+    };
+    nodes.forEach(n => depth(n.ref));
+    return Object.fromEntries(memo);
+  },
+
+  /** Returns positioned boxes and edges for drawing. */
+  place(nodes, { w = 190, h = 64, gx = 56, gy = 18 } = {}) {
+    const layer = this.layers(nodes);
+    const rows = {};
+    const pos = {};
+    nodes.forEach(n => {
+      const l = layer[n.ref];
+      rows[l] = (rows[l] || 0);
+      pos[n.ref] = { x: l * (w + gx), y: rows[l] * (h + gy), w, h };
+      rows[l] += 1;
+    });
+    const edges = [];
+    nodes.forEach(n => (n.from || []).forEach(f => { if (pos[f]) edges.push([f, n.ref]); }));
+    const width = Math.max(...Object.values(pos).map(p => p.x + w), w);
+    const height = Math.max(...Object.values(pos).map(p => p.y + h), h);
+    return { pos, edges, width, height };
+  }
+};
+
+let data = null;
+let existingById = new Map();
+let selected = null;
+
+/** Escapes text for innerHTML. */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** Title shown for a node: the existing node's title when reused. */
+function titleOf(n) {
+  if (n.existing_node_id != null) {
+    const e = existingById.get(n.existing_node_id);
+    return e ? e.title : `（不明な既存 ID ${n.existing_node_id}）`;
+  }
+  return n.title || '（タイトルなし）';
+}
+
+/** Draws a node graph as SVG with HTML boxes; onPick receives the clicked node. */
+function drawGraph(nodes, onPick, selectedRef) {
+  if (!nodes.length) return '<p class="muted">なし</p>';
+  const { pos, edges, width, height } = MapLayout.place(nodes);
+  const pad = 8;
+  const paths = edges.map(([a, b]) => {
+    const p = pos[a], q = pos[b];
+    const x1 = p.x + p.w + pad, y1 = p.y + p.h / 2 + pad, x2 = q.x + pad, y2 = q.y + q.h / 2 + pad;
+    const mx = (x1 + x2) / 2;
+    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 6},${y2}" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrow)"/>`;
+  }).join('');
+  const boxes = nodes.map(n => {
+    const p = pos[n.ref];
+    const reused = n.existing_node_id != null;
+    const subs = (n.sub_nodes || []).length;
+    const meta = [
+      reused ? '<span class="badge">再利用</span>' : '',
+      n.importance_score != null ? `重要度 ${Number(n.importance_score).toFixed(2)}` : '',
+      subs ? `サブ ${subs}` : '',
+      n.detour ? '寄り道あり' : ''
+    ].filter(Boolean).join(' · ');
+    return `<foreignObject x="${p.x + pad}" y="${p.y + pad}" width="${p.w}" height="${p.h}">
+      <div xmlns="http://www.w3.org/1999/xhtml" class="node-box ${reused ? 'reused' : ''} ${n.ref === selectedRef ? 'sel' : ''}" data-ref="${esc(n.ref)}">
+        <div class="t">${esc(titleOf(n))}</div><div class="m">${esc(n.ref)} · ${meta}</div>
+      </div></foreignObject>`;
+  }).join('');
+  const id = 'g' + Math.random().toString(36).slice(2);
+  setTimeout(() => document.querySelectorAll(`#${id} .node-box`).forEach(el =>
+    el.addEventListener('click', () => onPick(nodes.find(n => n.ref === el.dataset.ref)))));
+  return `<svg id="${id}" width="${width + pad * 2}" height="${height + pad * 2}">
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>${paths}${boxes}</svg>`;
+}
+
+/** Renders the whole page from the loaded JSON. */
+function render() {
+  const r = data.result || {};
+  const v = r.validation || { errors: [], warnings: [], stats: {} };
+  const s = v.stats || {};
+  const stats = [
+    ['ゴール', data.goal], ['難易度', `${data.params.label}（max_depth ${data.params.max_depth}）`], ['モデル', data.model],
+    ['試行回数', data.attempts.length], ['最初のトークン', r.first_token_at != null ? `${r.first_token_at}s` : '—'],
+    ['全体', r.total_seconds != null ? `${r.total_seconds}s` : '—'], ['終了理由', r.meta?.finish_reason ?? '—'],
+    ['切り出し = 全体 JSON', r.split_matches_full_document ? '一致' : '不一致'],
+    ['メインノード', `${s.main_node_count ?? '—'}（目安 ${s.node_count_target ?? '—'}）`], ['サブノード', s.sub_node_count ?? '—'],
+    ['再利用', s.reused_count ?? '—'], ['道', s.path_count ?? '—'], ['寄り道', s.detour_count ?? '—'],
+    ['トークン', r.meta?.usage ? `入力 ${r.meta.usage.promptTokenCount} / 出力 ${r.meta.usage.candidatesTokenCount}` : '—']
+  ];
+  document.getElementById('summary').innerHTML = stats.map(([k, val]) =>
+    `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(val)}</div></div>`).join('');
+
+  const list = (items, cls) => items.length ? `<ul class="msgs ${cls}">${items.map(m => `<li>${esc(m)}</li>`).join('')}</ul>` : '';
+  const attempts = data.attempts.map((a, i) => `<details ${i === data.attempts.length - 1 ? '' : ''}><summary>試行 ${i + 1}: ${
+    a.error ? `<span class="err">${esc(a.error)}</span>` : `エラー ${a.errors.length} / 警告 ${a.warnings.length}`}</summary>
+    ${a.error ? '' : list(a.errors, 'err') + list(a.warnings, 'warn')}</details>`).join('');
+  document.getElementById('validation').innerHTML =
+    (v.errors.length ? '' : '<p class="ok">最終結果はエラーなし</p>') + list(v.errors, 'err') + list(v.warnings, 'warn') +
+    (data.attempts.length > 1 ? `<h2 style="margin-top:12px">試行ごと</h2>${attempts}` : '');
+
+  renderGraph();
+
+  const tl = r.timeline || [];
+  const max = Math.max(r.total_seconds || 0, ...tl.map(t => t.at), 0.01);
+  document.getElementById('timeline').innerHTML = tl.map(t => {
+    const n = (r.main_nodes || []).find(m => m.ref === t.ref);
+    return `<div class="row"><span>${esc(t.ref)}</span><div title="${esc(n ? titleOf(n) : '')}"><div class="bar" style="width:${(t.at / max) * 100}%"></div></div><span>${t.at}s</span></div>`;
+  }).join('') || '<p class="muted">なし</p>';
+}
+
+/** Draws the main-node map. */
+function renderGraph() {
+  const nodes = data.result?.main_nodes || [];
+  document.getElementById('graph').innerHTML = drawGraph(nodes, n => { selected = n; renderGraph(); renderDetail([n]); }, selected?.ref);
+}
+
+/** Shows one node's detail; trail is the drill-down path from a main node. */
+function renderDetail(trail) {
+  const n = trail[trail.length - 1];
+  const crumbs = trail.map((t, i) => i < trail.length - 1
+    ? `<a href="#" data-i="${i}">${esc(titleOf(t))}</a>` : `<strong>${esc(titleOf(t))}</strong>`).join(' › ');
+  const reused = n.existing_node_id != null;
+  const inherited = reused ? (existingById.get(n.existing_node_id)?.sub_node_ids || []) : [];
+  const el = document.getElementById('detail');
+  el.classList.remove('muted');
+  el.innerHTML = `
+    <p>${crumbs}</p>
+    ${reused ? `<p><span class="badge">再利用 #${n.existing_node_id}</span>既存ノードをそのまま使う．</p>` : `<p>${esc(n.summary)}</p>`}
+    ${n.importance_score != null ? `<p class="muted">重要度 ${Number(n.importance_score).toFixed(2)} · from ${esc(JSON.stringify(n.from))}</p>` : `<p class="muted">from ${esc(JSON.stringify(n.from))}</p>`}
+    ${inherited.length ? `<h2>引き継ぐ既存サブノード</h2><p>${inherited.map(id => `<span class="badge">#${id} ${esc(existingById.get(id)?.title || '?')}</span>`).join(' ')}</p>` : ''}
+    <h2>${reused ? '追加されたサブノード' : 'サブノード'}</h2>
+    <div class="graph-wrap" id="subgraph"></div>
+    ${n.detour ? `<h2 style="margin-top:12px">寄り道</h2><p><strong>${esc(n.detour.title)}</strong><br><span class="muted">${esc(n.detour.reason)}</span></p>` : ''}
+    <details style="margin-top:12px"><summary class="muted">生の JSON</summary><pre>${esc(JSON.stringify(n, null, 2))}</pre></details>`;
+  document.getElementById('subgraph').innerHTML = drawGraph(n.sub_nodes || [], s => renderDetail([...trail, s]));
+  el.querySelectorAll('a[data-i]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    renderDetail(trail.slice(0, Number(a.dataset.i) + 1));
+  }));
+}
+
+/** Loads a result file chosen or dropped by the user. */
+function load(file) {
+  file.text().then(text => {
+    data = JSON.parse(text);
+    existingById = new Map((data.existing_nodes || []).map(n => [n.id, n]));
+    selected = null;
+    document.getElementById('app').hidden = false;
+    document.getElementById('detail').innerHTML = 'ノードを選ぶと要約・サブノード・寄り道が出ます．';
+    render();
+  }).catch(e => alert('読み込めませんでした: ' + e.message));
+}
+
+const drop = document.getElementById('drop');
+document.getElementById('file').addEventListener('change', e => e.target.files[0] && load(e.target.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && load(e.dataTransfer.files[0]); });
+</script>
+</body>
+</html>
