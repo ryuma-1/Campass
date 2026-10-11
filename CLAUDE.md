@@ -21,7 +21,9 @@ Approved gems (see `backend/Gemfile`): `rails` (~> 7.1.0), `mysql2`, `google-gen
 
 Also approved for Web login (F-019, `docs/design_doc.md` section 4.6), not in the Gemfile yet: `omniauth`, `omniauth-google-oauth2`, `omniauth-github`, `omniauth-rails_csrf_protection`, `rack-cors`.
 
-Ask the user before adding any other gem or npm package.
+Approved for the CLI (Go, `cli/`, `docs/design_doc.md` section 4.5.1): `github.com/spf13/cobra` (with its dependencies `spf13/pflag` and `inconshreveable/mousetrap`). HTTP and SSE use the standard library.
+
+Ask the user before adding any other gem, npm package or Go module.
 
 ---
 
