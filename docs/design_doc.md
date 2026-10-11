@@ -515,7 +515,7 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.5.7）から編�
 
 #### 4.3.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
-REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API を除いて `401` を返す．
+REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API（`POST /api/auth/:provider`，`GET /api/auth/:provider/callback`，`POST /api/auth/cli_login_requests`，`POST /api/auth/cli_login_requests/token`）を除いて `401` を返す．
 
 | エンドポイント | 概要 |
 | :--- | :--- |
@@ -640,7 +640,7 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 | `code` | 返す条件 |
 | :--- | :--- |
 | `authorization_pending` | `pending` で期限内．まだ許可も拒否もされていない |
-| `slow_down` | 前回の受け取り（`last_polled_at`）から `interval` 秒たっていない |
+| `slow_down` | 前回の受け取り（`last_polled_at`）から `interval` 秒たっていない．`slow_down` を返したときも `last_polled_at` を更新する |
 | `access_denied` | `denied` |
 | `expired_token` | 期限切れ，すでに `consumed`，または `device_code` に一致する要求がない |
 
@@ -1134,7 +1134,7 @@ CLI に関わる未決事項は 9章にまとめる（トークンの有効期�
 * フロントエンドのオリジンは環境変数 `FRONTEND_ORIGIN` で持つ．
 * **Cookie の属性**: ログインの Cookie と Rails 標準のセッションの Cookie は，`Domain` 属性を付けず `api.` にだけ付く．`HttpOnly`・`Secure`・`SameSite=Lax` とする．`Secure` は開発環境（`http://localhost`）でだけ外す．`Strict` にしないのは，Google / GitHub から `api.` のコールバックへ戻る遷移で Rails 標準のセッションの Cookie（`state`）が送られる必要があるためである．
 * **CORS**: `rack-cors` で，`FRONTEND_ORIGIN` だけを Cookie つき（`credentials`）で許可する．許可するメソッドは GET / POST / PATCH / DELETE，ヘッダーは `Content-Type` と `X-CSRF-Token` とする．
-* **CSRF**: Rails 標準の CSRF トークンを `GET /api/session` のレスポンス本文で返す（4.3.1）．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` を付ける．加えて，書き込み系では `Origin` ヘッダーが `FRONTEND_ORIGIN` と一致するかを確かめる．どちらかが合わなければ `403`（`invalid_csrf`）を返す．Bearer トークンのリクエストは CSRF の検査の対象外とする（ブラウザが他のサイトから勝手に付けることはできないため）．
+* **CSRF**: Rails 標準の CSRF トークンを `GET /api/session` のレスポンス本文で返す（4.3.1）．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` を付ける．加えて，書き込み系では `Origin` ヘッダーが `FRONTEND_ORIGIN` と一致するかを確かめる．どちらかが合わなければ `403`（`invalid_csrf`）を返す．Bearer トークンのリクエストは CSRF の検査の対象外とする（ブラウザが他のサイトから勝手に付けることはできないため）．認証なしの CLI のログイン要求の作成と受け取り（`POST /api/auth/cli_login_requests`，`…/token`，4.5.4）も Cookie を使わないため対象外とする．
 * **クライアント**: SPA は `fetch` に `credentials: 'include'` を付け，SSE は `new EventSource(url, { withCredentials: true })` でつなぐ（4.3.1）．
 * **開発環境**: React（`localhost:5173`）と Rails（`localhost:3000`）を別オリジンのまま動かし，`FRONTEND_ORIGIN=http://localhost:5173` として本番と同じ CORS の設定で開発する．ポートが違ってもサイトは同じなので，`SameSite=Lax` の Cookie は送られる．
 * Google / GitHub のクライアントID・シークレット（`GOOGLE_CLIENT_ID`，`GOOGLE_CLIENT_SECRET`，`GITHUB_CLIENT_ID`，`GITHUB_CLIENT_SECRET`）は，LLM APIのキーと同じくバックエンドの環境変数でだけ持ち，フロントエンドには渡さない．
@@ -1425,4 +1425,4 @@ Web のログインを Google / GitHub だけにしてパスワードを廃止�
 | v0.12.0 | 2026/10/09 | ノードの編集（ReqDef F-018）を追加し，4.2.10 を新設．現在地を `maps.current_node_id` から，マップごとの進捗の履歴（`map_progress_events`）による導出に変更し（ADR 0005），5.9 の採否を見直した．同じマップでメインノードが別のメインノードの中にも現れることを許すと明記（ADR 0006）．4.1，4.2.4，4.2.8（現在地，空のマップ），4.3.1（編集 API，`also_inside`，確認と循環のエラー），4.4，4.5（CLI の編集コマンドを 4.5.7 に追加し，未決事項を 4.5.8 へ），7〜9章を整合 | 池田 琉俊 |
 | v0.12.1 | 2026/10/11 | リポジトリを `backend/`・`frontend/`・`cli/` に分けた構成（基本設計書 2.5）に合わせ，4.5.2 に `cli/` の置き場所と Docker Compose の `cli` サービスを追記 | 池田 琉俊 |
 | v0.13.0 | 2026/10/11 | Web のログイン（ReqDef F-019）を決定し，4.6 Web の認証を新設（Google / GitHub でのログイン，DB に置く Cookie セッション，`app.` / `api.` の別オリジン，CSRF・CORS・`return_to` の制限）．4.1 で `users.password_digest` を削除し `user_identities` と `web_sessions` を追加．4.3.1 にログイン・セッションの API を追加し，ブラウザの SSE の認証を Cookie セッションに決定．4.4 に S-05 ログイン画面を追加．パスワードの廃止に合わせて 4.5.4 に注記し，5.11 を新設，6・7章に Web の認証を追加．9章からフロントエンドの認証方式を削除し，CLI のパスワード入力の論点を CLI のログイン方法に置き換えた | 池田 琉俊 |
-| v0.14.0 | 2026/10/11 | CLI のログインをデバイスコード方式（ブラウザで許可）に決定．4.1 に `cli_login_requests` を追加し，4.3.1 で `POST /api/auth/tokens` を廃止して CLI のログイン要求の API（作成・受け取り・照会・許可・拒否）を追加．4.4 に S-04 CLI ログインの承認を追加し，4.5.4 を書き直した．5.12 を新設し，6・7章に CLI のログインを追加．9章から CLI のログイン方法を削除 | 池田 琉俊 |
+| v0.14.0 | 2026/10/11 | CLI のログインをデバイスコード方式（ブラウザで許可）に決定．4.1 に `cli_login_requests` を追加し，4.3.1 で `POST /api/auth/tokens` を廃止して CLI のログイン要求の API（作成・受け取り・照会・許可・拒否）を追加．4.4 に S-04 CLI ログインの承認を追加し，4.5.4 を書き直し，4.6 で CSRF の検査の対象外に CLI のログイン要求の作成と受け取りを加えた．4.5.8 の未決事項を更新．5.12 を新設し，6・7章に CLI のログインを追加．9章から CLI のログイン方法を削除 | 池田 琉俊 |
