@@ -6,8 +6,9 @@ No test suite or test framework is set up yet. Do not add a test framework (e.g.
 
 From `docs/design_doc.md` section 7:
 
-- **Map structure**: JSON Schema validation of LLM output, plus detection of cycles in `map_paths`, `sub_node_paths` and `sub_nodes`, unknown references, and orphan nodes.
-- **Node reuse**: reused nodes are not duplicated, keep their progress, added sub nodes show up in other maps, and another user's nodes cannot be referenced.
+- **Map structure**: JSON Schema validation of LLM output, plus detection of cycles in `map_paths`, `sub_node_paths` and `sub_nodes`, unknown references, orphan nodes, main nodes that cannot reach the goal (the last main node), and a main node count outside the `node_count_target` range.
+- **Node reuse**: reused nodes are not duplicated, keep their progress, added sub nodes show up in other maps, and another user's nodes cannot be referenced. With a fixture where a reused node rewrites its existing sub nodes, `sub_nodes` and `sub_node_paths` are not duplicated, and existing ones left out of the output are not deleted.
+- **Regeneration (design_doc 4.2.4)**: with an LLM stub that returns output failing validation, the regeneration request carries the previous output and the validation errors as a conversation, and retries stop after 2. Whether regeneration can run after nodes are saved is open (design_doc section 9).
 - **Compass**: for maps in different progress states (nothing started, partly completed, several `in_progress`, only sub nodes completed, all completed) and graphs with branches and merges, check `current_node_id`, `candidates` (contents and order), and `is_goal_reached`. For shared nodes: known nodes drop out of candidates and satisfy incoming paths, nodes started in this map stay candidates, and `started_map_id = NULL` is not known.
 - **Progress update**: only the acting map's current position moves; resetting the node at the current position moves it back to the previous started or completed node; goal reached with an origin node returns a suggestion and never auto-completes it.
 - **Node editing (F-018)**: edits that make `map_paths`, `sub_node_paths` or `sub_nodes` cyclic return `422 cycle` and save nothing. Removing the node at the current position moves it back, and a node placed again does not reuse its old events; removing every main node returns to the start point and is not goal reached. Removing a main node deletes its paths and detour and deletes only nodes left unreferenced. Edits reaching other maps or deleting nodes with progress return `409 confirmation_required` and change nothing without `confirmed=true`. Edits on non-`ready` maps return `409 map_not_ready`; another user's nodes cannot be placed or edited. Suggestions return only the user's nodes with correct `already_main` and `inside`. In a map made from an origin node, placing or removing a main node changes the origin node's sub nodes the same way. Two edits of the same node from two places: the later save is kept and neither gets `409`.
@@ -31,3 +32,5 @@ From `docs/design_doc.md` section 7:
 ## LLM calls in tests
 
 Unit tests must not call the real LLM API. Use fixed JSON fixtures for LLM responses.
+
+Rewriting a reused node's full contents and regeneration with the previous output were never run against the real Gemini, even in the prototype. Check them by hand with real calls after implementing (design_doc section 7).
