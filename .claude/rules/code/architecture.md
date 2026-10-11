@@ -32,7 +32,7 @@ graph LR
 
 ## Authentication (F-019, design_doc 4.6)
 
-- The browser logs in with Google or GitHub only (no passwords, no sign-up screen) and is then authenticated by a Cookie session stored in `web_sessions` (SHA-256 digest only, 30 days sliding). The CLI uses Bearer tokens (`api_tokens`, design_doc 4.5.4). The backend accepts either; a request with an `Authorization` header is judged by the Bearer token only.
+- The browser logs in with Google or GitHub only (no passwords, no sign-up screen) and is then authenticated by a Cookie session stored in `web_sessions` (SHA-256 digest only, 30 days sliding). The CLI uses Bearer tokens (`api_tokens`, design_doc 4.5.4, also 30 days sliding). The backend accepts either; a request with an `Authorization` header is judged by the Bearer token only.
 - Frontend and backend are served on sibling subdomains of one parent domain (`app.` / `api.`): different origins, same site. CORS allows only `FRONTEND_ORIGIN`, with credentials. In development they run as `localhost:5173` and `localhost:3000` with the same CORS setup.
 - Cookie-session writes need the Rails CSRF token (`X-CSRF-Token`, from `GET /api/session`) and an `Origin` equal to `FRONTEND_ORIGIN`; Bearer requests skip both.
 
@@ -92,4 +92,4 @@ The app's concept (and its name, Campass) is "spread out a map and check the com
 
 ## Undecided
 
-The details of F-016 / F-017, the CLI token lifetime, and shared edits while another map is generating are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+The details of F-016 / F-017, shared edits while another map is generating, and cleaning up expired `api_tokens` / `web_sessions` / `cli_login_requests` rows are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
