@@ -73,7 +73,7 @@ There is no map list screen; the map list is a sidebar. `/`, `/maps` and a login
   1. Replace the map (nodes, paths, marks) and the compass as-is; keep the viewport position and zoom.
   2. If the detail panel is open, also refetch `GET /api/maps/:mapId/nodes/:nodeId`.
   3. If the selected node was removed from the map, close the panel, drop `?node=` and show 「このノードはマップから外されました」.
-  4. If an edit has unsaved input, keep it, show 「このノードは別の場所で変更されました」 and offer 「入力を捨てて最新を表示」.
+  4. If an edit has unsaved input and the refetched node changed since the input began, keep the input, show 「このノードは別の場所で変更されました」 and offer 「入力を捨てて最新を表示」.
   5. On `404`, follow the map deletion rule below.
   Concurrent edits from two places: the last save wins (design_doc 4.2.10); no `lock_version` in the first release.
 - **Map deletion**: from 「このマップを削除」 in the S-03 top menu. Show `GET /api/maps/:id/deletion_preview` first and warn that nodes started in this map stay in progress in the other maps. A `generating` map can be deleted too; add 「作成中です．削除すると作成も止まります」 to the confirmation. After deleting in this tab, go silently to S-03 of the remaining map with the latest `updated_at`, or S-02 if none. A map deleted elsewhere (other tab, CLI) is noticed by the SSE `deleted` event, a `404`, or by diffing each fetched map list against the previous one (ignoring maps deleted in this tab); stay on the current screen and show one notice listing all such maps. If the open map was deleted, move by the same rule first, then show the notice (`docs/design_doc.md` section 4.4).
