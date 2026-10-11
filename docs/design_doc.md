@@ -3,7 +3,7 @@
 * **ステータス**: Draft
 * **著者**: 池田 琉俊
 * **作成日**: 2026/07/01
-* **要件定義書**: `ReqDef.md`（v1.6.0 / 2026/10/09）
+* **要件定義書**: `ReqDef.md`（v1.7.0 / 2026/10/11）
 * **用語集**: `GLOSSARY.md`（用語は用語集に従う）
 
 ---
@@ -114,6 +114,9 @@ users ──1:N── maps ──1:N── map_nodes ──N:1── nodes ─�
                │  └── origin_node_id ──N:1── nodes（元ノード）
 users ──1:N── nodes ──1:N── sub_nodes（ノード → サブノード）
                      └──1:N── sub_node_paths（同じノードの中のサブノード間の道）
+users ──1:N── user_identities（連携した Google / GitHub のアカウント）
+users ──1:N── web_sessions（ブラウザのログイン）
+users ──1:N── api_tokens（CLI のトークン）
 ```
 
 * `map_nodes` は「あるマップに置かれたメインノード」を表す．サブノードは `map_nodes` に置かず，`sub_nodes` によってどのマップでも同じものが見える．あるマップで `map_nodes` にあるノードはそのマップのメインノードであり，そうでなくサブノードとして見えるノードはそのマップのサブノードである．
@@ -130,9 +133,33 @@ users ──1:N── nodes ──1:N── sub_nodes（ノード → サブノ�
 | カラム名 | 型 | 制約 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
-| `name` | VARCHAR(255) | NOT NULL | ユーザー名 |
-| `email` | VARCHAR(255) | NOT NULL, UNIQUE | メールアドレス |
-| `password_digest` | VARCHAR(255) | NOT NULL | 認証用パスワードハッシュ |
+| `name` | VARCHAR(255) | NOT NULL | ユーザー名．初めてログインしたときに，Google / GitHub のプロフィールの名前（なければメールアドレスの @ の前）を入れる（4.6） |
+| `email` | VARCHAR(255) | NOT NULL, UNIQUE | メールアドレス．初めてログインしたときの確認済みのメールアドレス．別のアカウントを同じユーザーにまとめるときに使う（4.6） |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | |
+
+パスワードは持たない（ReqDef F-019）．ログインは `user_identities` の Google / GitHub のアカウントで行う．
+
+**`user_identities`**（ユーザーと連携した Google / GitHub のアカウント，4.6）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `user_id` | BIGINT UNSIGNED | FK → `users.id`, NOT NULL, INDEX | |
+| `provider` | ENUM('google','github') | NOT NULL | |
+| `provider_uid` | VARCHAR(255) | NOT NULL | Google / GitHub でのアカウントの ID．メールアドレスは変わることがあるため，ログインの判定にはこれを使う |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | |
+| UNIQUE制約 | | `(provider, provider_uid)` | 1つのアカウントは1人のユーザーにだけ連携する |
+
+**`web_sessions`**（ブラウザのログインのセッション，4.6）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `user_id` | BIGINT UNSIGNED | FK → `users.id`, NOT NULL, INDEX | |
+| `token_digest` | CHAR(64) | NOT NULL, UNIQUE | セッショントークンの SHA-256 ハッシュ（16進）．平文は Cookie にだけ入れ，DBには保存しない |
+| `user_agent` | VARCHAR(255) | NULLABLE | ログインしたブラウザの User-Agent |
+| `last_used_at` | DATETIME | NOT NULL | 最後に使った時刻 |
+| `expires_at` | DATETIME | NOT NULL | 有効期限．最後に使ってから30日（4.6） |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
 **`api_tokens`**（CLI 用の認証トークン，4.5.4）
@@ -473,11 +500,15 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.5.7）から編�
 
 #### 4.3.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
-REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．CLI は `Authorization: Bearer <token>` ヘッダーで認証する（4.5.4）．
+REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API を除いて `401` を返す．
 
 | エンドポイント | 概要 |
 | :--- | :--- |
-| `POST /api/auth/tokens` | メールアドレスとパスワードで認証し，CLI 用のトークンを発行する（4.5.4）． |
+| `POST /api/auth/:provider` | Web のログインを始める（F-019，4.6）．`provider` は `google` / `github`．SPA の CSRF トークン付きのフォーム送信で呼び，Google / GitHub のログイン画面へ転送する．`return_to` を受け取る． |
+| `GET /api/auth/:provider/callback` | Google / GitHub からの戻り先（4.6）．ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する． |
+| `GET /api/session` | ログイン中のユーザーと CSRF トークンを返す（4.6）．未ログインなら `401`． |
+| `DELETE /api/session` | ログアウト．その端末のセッションだけを消す（4.6）． |
+| `POST /api/auth/tokens` | メールアドレスとパスワードで認証し，CLI 用のトークンを発行する（4.5.4）．パスワードを廃止したため（4.6），このままでは使えない．CLI のログイン方法は 9章の論点とする． |
 | `DELETE /api/auth/tokens/current` | リクエストに使ったトークンを失効させる（4.5.4）． |
 | `GET /api/maps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． |
 | `POST /api/maps` | マップを作り，同時に生成を開始する（F-011）．ゴールと難易度を受け取り，元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）．マップは `generating` で作られ，生成ジョブ（4.2.9）を起動して `201` を返す．生成の様子は `GET /api/maps/:id/generation` で受け取る． |
@@ -518,6 +549,25 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 
 * `title` は，ゴール候補（F-002）を選んだ場合はその候補のタイトル，自由入力のまま進んだ場合は入力した文とする．
 * マップの作成と生成の開始を1回のリクエストにまとめるため，生成前の状態は持たない（`status` は作成時から `generating`）．生成をやり直す API はない（4.2.9）．
+
+**`GET /api/session` レスポンス例**
+
+```json
+{
+  "user": { "id": 1, "name": "池田 琉俊", "email": "user@example.com" },
+  "csrf_token": "k9Xn..."
+}
+```
+
+未ログインの場合（`401`）:
+
+```json
+{ "code": "unauthenticated", "message": "ログインしてください．", "csrf_token": "k9Xn..." }
+```
+
+* `message` は他のエラーと同じく「コード→文言」の対応表から作る（`unauthenticated`，`invalid_csrf`）．S-05 に示すログインの失敗の理由（`email_not_verified`，`auth_failed`，4.6）も同じ対応表に置く．
+* `csrf_token` は Rails 標準の CSRF トークンである．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` ヘッダーとして付ける（4.6）．未ログインでも返すのは，S-05 のログインのフォーム送信（`POST /api/auth/:provider`）に必要なためである．
+* CSRF トークンがない・合わない，または `Origin` が `FRONTEND_ORIGIN` と一致しない書き込みには `403`（`code`: `invalid_csrf`）を返す（4.6）．
 
 **`POST /api/auth/tokens` リクエスト／レスポンス例**
 
@@ -666,7 +716,7 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 
 **`GET /api/maps/:id/generation` SSE イベント形式**
 
-レスポンスの `Content-Type` は `text/event-stream` とする．各イベントは `event:` 行と `data:` 行（JSON を1行で記載）からなり，空行で区切る（4.5.6 の CLI の受信方式と同じ）．CLI は `Authorization: Bearer <token>` で認証する（4.5.4）．ブラウザ側の SSE 認証はフロントエンドの認証方式（9章）が未決のため未定とする．ブラウザの `EventSource` はリクエストヘッダーを指定できないため，トークン方式にする場合は `fetch` のストリーム読み取り等が必要になる．
+レスポンスの `Content-Type` は `text/event-stream` とする．各イベントは `event:` 行と `data:` 行（JSON を1行で記載）からなり，空行で区切る（4.5.6 の CLI の受信方式と同じ）．CLI は `Authorization: Bearer <token>` で認証する（4.5.4）．ブラウザは `new EventSource(url, { withCredentials: true })` でつなぎ，ログインの Cookie で認証する（4.6）．`EventSource` はリクエストヘッダーを指定できないが，Cookie セッションなら追加のヘッダーは要らない．
 
 SSE は生成ジョブ（4.2.9）から直接ではなく，DB から読んで送る．接続するたびに次の順で送る．
 
@@ -762,6 +812,7 @@ ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロン
 | S-01 マップ一覧 | `/maps` | マップを平らに並べる．元ノードや寄り道から作ったマップには「Ruby の『オブジェクト指向』から」「Ruby の『Web アプリ開発』からの寄り道」のような注記を付ける（入れ子にはしない．マップ間ノードにより複数の親を持ち得るため）．生成の状態の示し方は下の「生成の状態」に従う． |
 | S-02 初期入力 | `/maps/new` | 興味，ゴール，難易度．寄り道から作る場合は寄り道のテーマを興味として入力済みにする． |
 | S-03 マップ画面 | `/maps/:mapId` | ノードを選んでいる状態は `?node=:nodeId` で表し，ブラウザの戻る・再読み込みで選択を保つ．ドリルダウンも同じパラメータで表す． |
+| S-05 ログイン | `/login?return_to=:path` | 「Google でログイン」「GitHub でログイン」の2つのボタンだけを置く（F-019）．未ログインでどの画面を開いてもここへ移り，ログイン後は `return_to` の画面へ戻る．ログインに失敗して戻った場合は理由を示す（4.6）． |
 
 **生成から最初の表示まで**
 
@@ -864,7 +915,7 @@ cli/
 
 #### 4.5.4 認証
 
-* `campass login` はメールアドレスとパスワードを入力させ，`POST /api/auth/tokens` でトークンを取得する．バックエンドはトークンの SHA-256 ハッシュのみを `api_tokens` に保存し，平文はこのレスポンスでのみ返す．
+* `campass login` はメールアドレスとパスワードを入力させ，`POST /api/auth/tokens` でトークンを取得する．バックエンドはトークンの SHA-256 ハッシュのみを `api_tokens` に保存し，平文はこのレスポンスでのみ返す．ただし，Web のログインを Google / GitHub だけにしてパスワードを廃止したため（4.6），この方式は使えない．CLI のログイン方法は 9章の論点とする．
 * CLI はトークンを `os.UserConfigDir()` 配下の `campass/credentials.json` に，所有者のみ読み書きできる権限（0600）で保存する．
 * 以後のリクエストには `Authorization: Bearer <token>` を付ける．`401` が返った場合は `campass login` のやり直しを促す．
 * `campass logout` は `DELETE /api/auth/tokens/current` でトークンを失効させてから，ローカルのファイルを削除する．
@@ -935,6 +986,54 @@ campass importance  <map_id> <node_id> high|mid|low
 #### 4.5.8 未決事項
 
 CLI に関わる未決事項は 9章にまとめる（認証まわり，配布方法）．生成中の中断（Ctrl+C）の扱いは 4.2.9 と 4.5.3 で決めた．
+
+### 4.6 Web の認証（F-019）
+
+ブラウザのログインは Google と GitHub のアカウントで行い，ログイン後は DB に置く Cookie セッションで認証する．CLI のトークン（4.5.4）とは別の仕組みとし，バックエンドはどちらでもユーザーを特定できるようにする．方式を選んだ理由は 5.11 に示す．
+
+**ログインと利用者**
+
+* ログインは Google と GitHub のアカウントだけで行う．Campass はパスワードを持たない（`users` に `password_digest` はない）．
+* 登録画面はない．初めてログインしたときにユーザーを作り，`users.name` にはプロフィールの名前（なければメールアドレスの @ の前）を入れる．
+* ログインの判定は `user_identities` の `provider` + `provider_uid` で行う．メールアドレスは Google / GitHub 側で変わることがあるためである．
+* Google / GitHub が「確認済み」とするメールアドレスだけを使う．Google は `email_verified` が `true` のメールアドレス，GitHub はメールアドレス一覧（スコープ `user:email`）のうち `verified` のものとする（既存のユーザーとまとめるときはそのどれかが一致すればよく，ユーザーを作るときは `primary` のものを優先する）．確認済みのメールアドレスがないアカウントではログインさせず，S-05 に「確認済みのメールアドレスが必要です」と表示する．
+* ログインのたびに次の順でユーザーを決める．
+  1. `(provider, provider_uid)` の `user_identities` があれば，そのユーザーとする．
+  2. なければ，確認済みのメールアドレスのどれかが既存の `users.email` と一致するユーザーに，`user_identities` を1行足してまとめる．Google と GitHub で同じメールアドレスを使っていれば，どちらでログインしても同じユーザーになる．
+  3. それもなければ，ユーザーと `user_identities` を作る．
+* 確認していないメールアドレスでまとめないのは，乗っ取りを防ぐためである．他人のメールアドレスを確認せずに登録できるサービスでそのアドレスを名乗れば，まとめた先のユーザー（他人のマップとノード）にログインできてしまう．
+
+**セッション**
+
+* Cookie には，ランダムな長いセッショントークン（例：`SecureRandom.urlsafe_base64(32)`）だけを入れる．DB の `web_sessions.token_digest` にはその SHA-256 ハッシュを保存し，平文は保存しない（`api_tokens` と同じ考え方．DB が漏れてもセッションは使えない）．
+* 有効期限は最後に使ってから30日とする．使うと `last_used_at` と `expires_at` を更新して延ばす（スライド式）．絶対的な上限は設けない．期限切れのセッションは使わず，`401` を返す．
+* ログアウト（`DELETE /api/session`）は，その端末の `web_sessions` の行を消し，Cookie を消す．同じユーザーの他の端末のセッションと CLI のトークンには触れない．
+* バックエンドは「Cookie セッション または Bearer トークン（CLI，4.5.4）」でユーザーを特定する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定し，Cookie は見ない．
+* omniauth がログインの途中で一時的に使う値（`state`，Google の PKCE の値，`return_to`）は，Rails 標準の Cookie セッション（暗号化された Cookie）に置く．Rails の API モードでは外れているセッションと Cookie のミドルウェア（`ActionDispatch::Cookies`，`ActionDispatch::Session::CookieStore`）を戻し，`ActionController::API` に含まれない `ActionController::Cookies` と `ActionController::RequestForgeryProtection` もコントローラーに読み込む．ログインが済んだら，この一時的なセッションはリセットする（セッション固定の防止）．ログインの状態そのものは，この Cookie ではなく `web_sessions` で持つ．
+
+**配信とセキュリティ**
+
+* フロントエンドとバックエンドは，同じ親ドメインのサブドメインで配信する（例：`app.campass.example.com` / `api.campass.example.com`）．別オリジンだが同じサイトなので，`SameSite=Lax` の Cookie が送られる．まったく別のドメインには置かない（バックエンドの Cookie がサードパーティ Cookie になり，送られないブラウザがあるため）．
+* フロントエンドのオリジンは環境変数 `FRONTEND_ORIGIN` で持つ．
+* **Cookie の属性**: ログインの Cookie と Rails 標準のセッションの Cookie は，`Domain` 属性を付けず `api.` にだけ付く．`HttpOnly`・`Secure`・`SameSite=Lax` とする．`Secure` は開発環境（`http://localhost`）でだけ外す．`Strict` にしないのは，Google / GitHub から `api.` のコールバックへ戻る遷移で Rails 標準のセッションの Cookie（`state`）が送られる必要があるためである．
+* **CORS**: `rack-cors` で，`FRONTEND_ORIGIN` だけを Cookie つき（`credentials`）で許可する．許可するメソッドは GET / POST / PATCH / DELETE，ヘッダーは `Content-Type` と `X-CSRF-Token` とする．
+* **CSRF**: Rails 標準の CSRF トークンを `GET /api/session` のレスポンス本文で返す（4.3.1）．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` を付ける．加えて，書き込み系では `Origin` ヘッダーが `FRONTEND_ORIGIN` と一致するかを確かめる．どちらかが合わなければ `403`（`invalid_csrf`）を返す．Bearer トークンのリクエストは CSRF の検査の対象外とする（ブラウザが他のサイトから勝手に付けることはできないため）．
+* **クライアント**: SPA は `fetch` に `credentials: 'include'` を付け，SSE は `new EventSource(url, { withCredentials: true })` でつなぐ（4.3.1）．
+* **開発環境**: React（`localhost:5173`）と Rails（`localhost:3000`）を別オリジンのまま動かし，`FRONTEND_ORIGIN=http://localhost:5173` として本番と同じ CORS の設定で開発する．ポートが違ってもサイトは同じなので，`SameSite=Lax` の Cookie は送られる．
+* Google / GitHub のクライアントID・シークレット（`GOOGLE_CLIENT_ID`，`GOOGLE_CLIENT_SECRET`，`GITHUB_CLIENT_ID`，`GITHUB_CLIENT_SECRET`）は，LLM APIのキーと同じくバックエンドの環境変数でだけ持ち，フロントエンドには渡さない．
+
+**ログインの流れ**
+
+未ログインで `/cli/activate` を開いた場合を例にする．
+
+1. SPA が `GET /api/session` を呼び，`401` なら S-05 `/login?return_to=/cli/activate` に移る．
+2. 「Google でログイン」「GitHub でログイン」は，`api.` の `POST /api/auth/google` / `POST /api/auth/github` への，CSRF トークン付きのフォーム送信とする（`omniauth-rails_csrf_protection`．GET でログインを始められると，他のサイトから勝手にログインを始めさせられるため）．フォームには `return_to` を含め，バックエンドは一時的なセッションに覚えて Google / GitHub のログイン画面へ転送する．
+3. Google / GitHub でログインすると，`api.` の `GET /api/auth/:provider/callback` に戻る．`state` を確かめ，上の「ログインと利用者」の規則でユーザーを探すか作り，`web_sessions` に1行足してログインの Cookie を付ける．Google では PKCE を有効にする．
+4. `FRONTEND_ORIGIN` + `return_to` へ転送する．`return_to` は `/` で始まり `//` で始まらないパスだけを受け付け，それ以外（絶対 URL，`//evil.example.com` など）や指定なしは `/maps` にする．転送先のオリジンは利用者の入力から決めず，常に `FRONTEND_ORIGIN` とする（オープンリダイレクトの防止）．
+5. ログインに失敗した場合（確認済みのメールアドレスがない，`state` が合わない，Google / GitHub で拒否された）は，`FRONTEND_ORIGIN` + `/login?error=:code` へ転送し，S-05 に理由を表示する．`code` は `email_not_verified`（「確認済みのメールアドレスが必要です」）と `auth_failed` とする．
+
+* omniauth の既定のパス（`/auth/:provider`）は，`path_prefix` を `/api/auth` にして上の API に合わせる．
+* GitHub はスコープ `user:email` を指定し，メールアドレス一覧から確認済みのものを取る．
 
 ## 5. 検討した代替案（Alternatives Considered）
 
@@ -1049,10 +1148,66 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
   * Solid Queue：ジョブが DB に残り再起動後に再実行できるが，gem・ワーカープロセス・キュー用テーブルが増える．LLM のストリームは途中から再開できないため，再実行しても最初からやり直すことになり，すでに送ったノードと食い違う．得られるのは「失敗に早く気づける」ことだけで，それはハートビートで足りる．
   * 必要になれば，`queue_adapter` の設定を変えて移行する．
 
+### 5.11 Web の認証
+
+ブラウザのログインについて，次の5点を比べた（4.6）．
+
+**(1) セッションの持ち方：Cookie セッション vs トークン方式**
+
+* **案A（採用）**: ランダムなセッショントークンを `HttpOnly` の Cookie に入れる．
+  * 利点: JavaScript からトークンを読めないため，XSS があってもトークンそのものは盗まれない．`EventSource` はヘッダーを付けられないが，Cookie なら SSE もそのまま認証できる．
+  * 欠点: Cookie はブラウザが自動で送るため，CSRF の対策（CSRF トークンと `Origin` の確認）と CORS の設定が要る．
+* **案B（不採用）**: CLI と同じトークンを SPA が保存し，`Authorization: Bearer` で送る．
+  * 利点: CSRF の対策が要らず，バックエンドの認証の仕組みを CLI と1つにできる．
+  * 欠点: トークンを `localStorage` などに置くと，XSS で読み出される．SSE は `EventSource` を使えず，`fetch` でストリームを読む処理を自分で書くことになる．
+
+**(2) ログイン方法：Google / GitHub だけ vs パスワードも残す**
+
+* **案A（採用）**: Google と GitHub のアカウントだけでログインする．
+  * 利点: パスワードを保存しないため，パスワードの漏えい・使い回し・リセットの仕組みを考えなくてよい．登録画面が要らない．Web でログインできれば，CLI も Web のログインに乗せられる．
+  * 欠点: どちらのアカウントも持たない人は使えない．Google / GitHub が止まるとログインできない．
+* **案B（不採用）**: メールアドレスとパスワードのログインも残す．
+  * 利点: 外部のアカウントを持たない人も使える．
+  * 欠点: パスワードのハッシュ，リセットのメール送信，メールアドレスの確認が要り，実装と運用の負担が大きい．外部アカウントとまとめるときの確認も複雑になる．
+
+**(3) 配信の形：別オリジン・同じ親ドメイン vs 同じオリジン vs まったく別のドメイン**
+
+* **案A（採用）**: `app.` と `api.` のように，同じ親ドメインのサブドメインに分ける．
+  * 利点: フロントエンドとバックエンドを別々に配信・デプロイできる．同じサイトなので `SameSite=Lax` の Cookie が送られ，サードパーティ Cookie の制限を受けない．開発環境（`localhost:5173` と `localhost:3000`）も同じ形になる．
+  * 欠点: CORS の設定（`credentials` つき）と，書き込みの `Origin` の確認が要る．
+* **案B（不採用）**: 同じオリジンにまとめる（Rails が SPA も配信する，またはリバースプロキシで `/api` を振り分ける）．
+  * 利点: CORS が要らず，Cookie の扱いが最も単純．
+  * 欠点: 配信の仕組みが1つにまとまり，フロントエンドだけを CDN などで配信しにくい．開発環境でもプロキシの設定が要る．
+* **案C（不採用）**: まったく別のドメインに置く．
+  * 利点: 配信先を自由に選べる．
+  * 欠点: バックエンドの Cookie がサードパーティ Cookie になり，送られないブラウザがある．
+
+**(4) OAuth の実装：omniauth vs 自前で書く**
+
+* **案A（採用）**: `omniauth`，`omniauth-google-oauth2`，`omniauth-github` と `omniauth-rails_csrf_protection` を使う．
+  * 利点: `state` の確認，PKCE，トークンの交換，プロフィールの取得を広く使われた実装に任せられる．Rails で標準的な方法で，テスト用のモックもある．
+  * 欠点: omniauth 関連の gem が4つ増える．omniauth はセッションを使うため，API モードで外したミドルウェアを戻す必要がある．
+* **案B（不採用）**: OAuth 2.0 の処理を標準ライブラリ（`Net::HTTP`）で自前で書く．
+  * 利点: 依存が増えない．
+  * 欠点: `state` や PKCE の確認など，誤るとそのまま脆弱性になる処理を自分で書いて保守することになる．
+
+**(5) セッションの保存先：DB の自前テーブル vs `activerecord-session_store` vs `api_tokens` とまとめる**
+
+* **案A（採用）**: `web_sessions` を作り，トークンのハッシュ，有効期限，最終利用時刻を持つ．
+  * 利点: ハッシュだけを保存するため，DB が漏れてもセッションは使えない．その端末だけのログアウト，30日のスライド式の期限を素直に書ける．将来の「ログイン中の端末の一覧」にも使える．gem が要らない．
+  * 欠点: セッションの発行・確認・延長を自分で書く．
+* **案B（不採用）**: `activerecord-session_store` で Rails のセッションを DB に置く．
+  * 利点: Rails のセッションの仕組みをそのまま使える．
+  * 欠点: gem が増える．セッションの中身をそのまま保存し，ユーザーとの対応やスライド式の期限を扱うには結局手を入れる必要がある．
+* **案C（不採用）**: `api_tokens` にまとめ，種類を表すカラムで Web と CLI を分ける．
+  * 利点: テーブルとトークンを確かめる処理を1つにできる．
+  * 欠点: Web のセッションと CLI のトークンは，発行のしかた（Cookie か，レスポンスで渡すか），CSRF の検査の有無，`user_agent` と `name` のように持つ情報が違い，条件分岐が増える．
+
 ## 6. 懸念事項（Caveats / Security / Privacy Concerns）
 
 * **APIキーの秘匿化**: 外部LLM APIキーは必ずバックエンド（サーバーサイド）で管理し，フロントエンドへ絶対に露出させない．環境変数またはシークレットマネージャで管理し，リポジトリへのコミットを防ぐ仕組み（lint / pre-commit hook 等）を導入する（ReqDef 5.3）．
 * **学習データへの利用オプトアウト**: ユーザーの自由記述ワーク（興味・ゴールの入力等）に個人情報や機密情報が含まれる可能性があるため，LLM API呼び出し時には「モデル学習への非利用（オプトアウト）」設定を必須パラメータとし，リクエスト送信前にこの設定が有効であることをバックエンド側でバリデーションする（ReqDef 5.3）．
+* **Web のログイン**: Cookie は `HttpOnly`・`Secure`・`SameSite=Lax` とし，CSRF トークンと `Origin` の確認，`FRONTEND_ORIGIN` だけを許す CORS，`return_to` の制限でクロスサイトからの書き込みとオープンリダイレクトを防ぐ．確認していないメールアドレスではユーザーをまとめない（4.6）．
 * **CLI のトークン管理**: CLI のトークンはユーザーの端末にファイルとして保存されるため，所有者のみ読み書きできる権限（0600）で保存し，有効期限を設ける．`campass logout` で失効でき，DBにはハッシュのみを保存する（4.5.4）．
 * **プロンプトインジェクション対策**: ユーザーの自由入力がそのままLLMへのプロンプトに埋め込まれるため，システムプロンプトとユーザー入力を明確に分離し，構造化出力（JSON Schema／ツール呼び出し）を強制することで，意図しない指示の混入や出力形式の破壊を防ぐ．
 * **マップのデータ保持**: マップ，ノードおよび学習ログはユーザーが自ら削除するか退会するまで永続保持する方針のため，退会時のデータ削除フロー（物理削除 or 論理削除）を別途明確にする必要がある（ReqDef 5.4）．
@@ -1084,6 +1239,15 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
   * 元ノードから作ったマップでメインノードを追加・外すと，元ノードのサブノードも同じように変わること．
 * **マップ削除のテスト**: 他のマップに登場するノードと進捗が残り，どこにも登場しなくなったノードが削除されること，`deletion_preview` がそのマップで学習中にしたノードを返すことを確認する．
 * **セキュリティテスト**: APIキーがフロントエンドのレスポンス・ソースマップ等に含まれていないことのスキャン，オプトアウト設定が常にリクエストに付与されていることの回帰テスト．
+* **Web の認証のテスト**（4.6）: Google / GitHub の応答は omniauth のテスト用の設定（モック）で置き換え，実際の Google / GitHub は呼ばない．
+  * 初めてのログインでユーザーと `user_identities` が作られ，`users.name` にプロフィールの名前（なければメールアドレスの @ の前）が入ること．2回目以降は `provider` + `provider_uid` で同じユーザーになり，メールアドレスが変わっていても同じユーザーになること．
+  * 確認済みのメールアドレスが既存の `users.email` と一致すれば同じユーザーにまとめ，新しいユーザーを作らないこと．確認済みのメールアドレスがなければログインさせず，ユーザーも作らないこと．
+  * `return_to` が `/maps/123` ならそこへ，`//evil.example.com`，`https://evil.example.com/` のような絶対 URL，`/` で始まらない値，指定なしなら `/maps` へ転送されること．転送先のオリジンが常に `FRONTEND_ORIGIN` であること．
+  * Cookie セッションの書き込みが，CSRF トークンなし・違うトークン・`Origin` 違いでは `403` で拒否され，何も変わらないこと．Bearer トークンのリクエストは CSRF トークンなしで通ること．
+  * 最後に使ってから30日を過ぎたセッションは `401` になり，期限内に使うと期限が延びること．
+  * ログアウトでその端末のセッションだけが消え，同じユーザーの別の端末のセッションと CLI のトークンは使えること．
+  * `FRONTEND_ORIGIN` 以外のオリジンからのリクエストに，CORS の許可（`Access-Control-Allow-Origin`）が返らないこと．
+  * DB に保存されるのがセッショントークンのハッシュだけで，平文が残らないこと．
 * **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．ノードの編集については，`409 confirmation_required` で `y/N` の確認を出し，`y` のときだけ `confirmed=true` で送り直すこと，`--new` を付けると提案を出さないことを検証する．トークンファイルが 0600 で保存されることも確認する．
 * **負荷テスト**: ReqDef 5.2 の想定同時接続数（通常100 DAU，ピーク1,000 DAU）を基準としたマップ生成APIの負荷試験．
 
@@ -1102,9 +1266,8 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
 * **F-016 / F-017 の詳細**: 「もっと詳しく」で追加するサブノードの生成方法と API，ノードのマップ化の API と UI．元ノードから作ったマップを編集したときに元ノードのサブノードも変える規則（4.2.10）も，ここで合わせて確定する．
 * **生成中のマップと共有の編集**: 編集は `ready` のマップからだけ行えるが，内容やサブノードは共有のため，同じノードを再利用している別のマップが生成中のことがある．ユーザーがサブノードを外して削除した直後に，生成ジョブがそのノードを参照すると，未知の参照（4.2.4）として生成が失敗し得る．初期リリースでどこまで対処するか．
 * LLM生成コンテンツの品質担保（幻覚対策）について，将来的にファクトチェック機構やユーザーフィードバックによる品質改善ループを設けるか．
-* **フロントエンドの認証方式**: フロントエンドを Cookie セッションにするか，CLI と同じトークン方式（4.5.4，5.6）にするか．
 * **CLI トークンの有効期限**: `api_tokens.expires_at` に設定する期間と，期限切れ時の扱い．
-* **CLI のパスワード入力の非表示**: Go の標準ライブラリには端末のエコーを止める API がない．Unix 系では `stty` コマンドを使えるが，Windows での扱いが未決．
+* **CLI のログイン方法**: パスワードを廃止したため（4.6），`campass login` のメールアドレスとパスワードでの方式（4.5.4）は使えない．Web のログインを使う方式に変える必要がある．
 * **CLI の配布方法**: 実行ファイルの配布先（GitHub Releases 等）とバージョン管理．
 
 ## 10. 変更履歴
@@ -1125,3 +1288,4 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
 | v0.11.1 | 2026/10/09 | 7章のストリーミングの E2E テスト方針を，生成中に接続が切れた場合の扱い（4.2.9，v0.11.0）に合わせて具体化（つなぎ直し，ID による重複の除去，再読み込み，失敗と削除の終端イベント） | 池田 琉俊 |
 | v0.12.0 | 2026/10/09 | ノードの編集（ReqDef F-018）を追加し，4.2.10 を新設．現在地を `maps.current_node_id` から，マップごとの進捗の履歴（`map_progress_events`）による導出に変更し（ADR 0005），5.9 の採否を見直した．同じマップでメインノードが別のメインノードの中にも現れることを許すと明記（ADR 0006）．4.1，4.2.4，4.2.8（現在地，空のマップ），4.3.1（編集 API，`also_inside`，確認と循環のエラー），4.4，4.5（CLI の編集コマンドを 4.5.7 に追加し，未決事項を 4.5.8 へ），7〜9章を整合 | 池田 琉俊 |
 | v0.12.1 | 2026/10/11 | リポジトリを `backend/`・`frontend/`・`cli/` に分けた構成（基本設計書 2.5）に合わせ，4.5.2 に `cli/` の置き場所と Docker Compose の `cli` サービスを追記 | 池田 琉俊 |
+| v0.13.0 | 2026/10/11 | Web のログイン（ReqDef F-019）を決定し，4.6 Web の認証を新設（Google / GitHub でのログイン，DB に置く Cookie セッション，`app.` / `api.` の別オリジン，CSRF・CORS・`return_to` の制限）．4.1 で `users.password_digest` を削除し `user_identities` と `web_sessions` を追加．4.3.1 にログイン・セッションの API を追加し，ブラウザの SSE の認証を Cookie セッションに決定．4.4 に S-05 ログイン画面を追加．パスワードの廃止に合わせて 4.5.4 に注記し，5.11 を新設，6・7章に Web の認証を追加．9章からフロントエンドの認証方式を削除し，CLI のパスワード入力の論点を CLI のログイン方法に置き換えた | 池田 琉俊 |
