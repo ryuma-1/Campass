@@ -77,9 +77,9 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 ## Authentication (F-019, `docs/design_doc.md` section 4.6)
 
 - Identify the user by the Cookie session (`web_sessions`) or a Bearer token (`api_tokens`). If the `Authorization` header is present, use only the Bearer token. Everything except the login endpoints returns `401` without a user.
-- Find the user by `user_identities (provider, provider_uid)`, never by email. Without one, merge into the user whose `email` equals the provider's **verified** email (Google `email_verified`, GitHub primary + `verified`), else create the user. No verified email → no login (`/login?error=email_not_verified`).
+- Find the user by `user_identities (provider, provider_uid)`, never by email. Without one, merge into the user whose `email` equals the provider's **verified** email (Google `email_verified`, any GitHub `verified` email; prefer the primary one when creating a user), else create the user. No verified email → no login (`/login?error=email_not_verified`).
 - Session: random token in the Cookie, only its SHA-256 in `token_digest`; expires 30 days after last use and is extended on use. Logout deletes only that row.
-- Cookies (login and Rails session): no `Domain`, `HttpOnly`, `SameSite=Lax`, `Secure` except in development. Re-enable `ActionDispatch::Cookies` and `ActionDispatch::Session::CookieStore` for omniauth's `state`, PKCE (Google) and `return_to`; reset that session after login.
+- Cookies (login and Rails session): no `Domain`, `HttpOnly`, `SameSite=Lax`, `Secure` except in development. Re-enable `ActionDispatch::Cookies` and `ActionDispatch::Session::CookieStore` (and include `ActionController::Cookies` / `ActionController::RequestForgeryProtection`) for omniauth's `state`, PKCE (Google) and `return_to`; reset that session after login.
 - Cookie-session POST / PATCH / DELETE: check the Rails CSRF token and that `Origin` equals `FRONTEND_ORIGIN`, else `403 invalid_csrf`. Bearer requests skip both. CORS (`rack-cors`) allows only `FRONTEND_ORIGIN` with credentials.
 - `return_to`: accept only paths starting with `/` and not `//`; otherwise `/maps`. The redirect origin is always `FRONTEND_ORIGIN`.
 

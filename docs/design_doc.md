@@ -565,6 +565,7 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 { "code": "unauthenticated", "message": "ログインしてください．", "csrf_token": "k9Xn..." }
 ```
 
+* `message` は他のエラーと同じく「コード→文言」の対応表から作る（`unauthenticated`，`invalid_csrf`）．S-05 に示すログインの失敗の理由（`email_not_verified`，`auth_failed`，4.6）も同じ対応表に置く．
 * `csrf_token` は Rails 標準の CSRF トークンである．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` ヘッダーとして付ける（4.6）．未ログインでも返すのは，S-05 のログインのフォーム送信（`POST /api/auth/:provider`）に必要なためである．
 * CSRF トークンがない・合わない，または `Origin` が `FRONTEND_ORIGIN` と一致しない書き込みには `403`（`code`: `invalid_csrf`）を返す（4.6）．
 
@@ -995,20 +996,20 @@ CLI に関わる未決事項は 9章にまとめる（認証まわり，配布�
 * ログインは Google と GitHub のアカウントだけで行う．Campass はパスワードを持たない（`users` に `password_digest` はない）．
 * 登録画面はない．初めてログインしたときにユーザーを作り，`users.name` にはプロフィールの名前（なければメールアドレスの @ の前）を入れる．
 * ログインの判定は `user_identities` の `provider` + `provider_uid` で行う．メールアドレスは Google / GitHub 側で変わることがあるためである．
-* Google / GitHub が「確認済み」とするメールアドレスだけを使う．Google は `email_verified` が `true` のメールアドレス，GitHub はメールアドレス一覧（スコープ `user:email`）のうち `primary` かつ `verified` のものとする．確認済みのメールアドレスがないアカウントではログインさせず，S-05 に「確認済みのメールアドレスが必要です」と表示する．
+* Google / GitHub が「確認済み」とするメールアドレスだけを使う．Google は `email_verified` が `true` のメールアドレス，GitHub はメールアドレス一覧（スコープ `user:email`）のうち `verified` のものとする（既存のユーザーとまとめるときはそのどれかが一致すればよく，ユーザーを作るときは `primary` のものを優先する）．確認済みのメールアドレスがないアカウントではログインさせず，S-05 に「確認済みのメールアドレスが必要です」と表示する．
 * ログインのたびに次の順でユーザーを決める．
   1. `(provider, provider_uid)` の `user_identities` があれば，そのユーザーとする．
-  2. なければ，確認済みのメールアドレスが既存の `users.email` と一致するユーザーに，`user_identities` を1行足してまとめる．Google と GitHub で同じメールアドレスを使っていれば，どちらでログインしても同じユーザーになる．
+  2. なければ，確認済みのメールアドレスのどれかが既存の `users.email` と一致するユーザーに，`user_identities` を1行足してまとめる．Google と GitHub で同じメールアドレスを使っていれば，どちらでログインしても同じユーザーになる．
   3. それもなければ，ユーザーと `user_identities` を作る．
 * 確認していないメールアドレスでまとめないのは，乗っ取りを防ぐためである．他人のメールアドレスを確認せずに登録できるサービスでそのアドレスを名乗れば，まとめた先のユーザー（他人のマップとノード）にログインできてしまう．
 
 **セッション**
 
 * Cookie には，ランダムな長いセッショントークン（例：`SecureRandom.urlsafe_base64(32)`）だけを入れる．DB の `web_sessions.token_digest` にはその SHA-256 ハッシュを保存し，平文は保存しない（`api_tokens` と同じ考え方．DB が漏れてもセッションは使えない）．
-* 有効期限は最後に使ってから30日とする．使うたびに `last_used_at` と `expires_at` を更新して延ばす（スライド式）．絶対的な上限は設けない．期限切れのセッションは使わず，`401` を返す．
+* 有効期限は最後に使ってから30日とする．使うと `last_used_at` と `expires_at` を更新して延ばす（スライド式）．絶対的な上限は設けない．期限切れのセッションは使わず，`401` を返す．
 * ログアウト（`DELETE /api/session`）は，その端末の `web_sessions` の行を消し，Cookie を消す．同じユーザーの他の端末のセッションと CLI のトークンには触れない．
 * バックエンドは「Cookie セッション または Bearer トークン（CLI，4.5.4）」でユーザーを特定する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定し，Cookie は見ない．
-* omniauth がログインの途中で一時的に使う値（`state`，Google の PKCE の値，`return_to`）は，Rails 標準の Cookie セッション（暗号化された Cookie）に置く．Rails の API モードでは外れているセッションと Cookie のミドルウェア（`ActionDispatch::Cookies`，`ActionDispatch::Session::CookieStore`）を戻す．ログインが済んだら，この一時的なセッションはリセットする（セッション固定の防止）．ログインの状態そのものは，この Cookie ではなく `web_sessions` で持つ．
+* omniauth がログインの途中で一時的に使う値（`state`，Google の PKCE の値，`return_to`）は，Rails 標準の Cookie セッション（暗号化された Cookie）に置く．Rails の API モードでは外れているセッションと Cookie のミドルウェア（`ActionDispatch::Cookies`，`ActionDispatch::Session::CookieStore`）を戻し，`ActionController::API` に含まれない `ActionController::Cookies` と `ActionController::RequestForgeryProtection` もコントローラーに読み込む．ログインが済んだら，この一時的なセッションはリセットする（セッション固定の防止）．ログインの状態そのものは，この Cookie ではなく `web_sessions` で持つ．
 
 **配信とセキュリティ**
 
@@ -1185,7 +1186,7 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
 
 * **案A（採用）**: `omniauth`，`omniauth-google-oauth2`，`omniauth-github` と `omniauth-rails_csrf_protection` を使う．
   * 利点: `state` の確認，PKCE，トークンの交換，プロフィールの取得を広く使われた実装に任せられる．Rails で標準的な方法で，テスト用のモックもある．
-  * 欠点: gem が4つ増える．omniauth はセッションを使うため，API モードで外したミドルウェアを戻す必要がある．
+  * 欠点: omniauth 関連の gem が4つ増える．omniauth はセッションを使うため，API モードで外したミドルウェアを戻す必要がある．
 * **案B（不採用）**: OAuth 2.0 の処理を標準ライブラリ（`Net::HTTP`）で自前で書く．
   * 利点: 依存が増えない．
   * 欠点: `state` や PKCE の確認など，誤るとそのまま脆弱性になる処理を自分で書いて保守することになる．
