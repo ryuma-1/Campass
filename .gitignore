@@ -1,6 +1,1 @@
 .env
-
-/.bundle/
-/vendor/bundle/
-/log/*.log
-/tmp/

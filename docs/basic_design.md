@@ -20,6 +20,7 @@
 | v1.6.0 | 2026/10/09 | 前提知識アセスメント（ReqDef F-004）の廃止に合わせ，CLI構成（2.4），画面一覧（3.1），CLIコマンド一覧（3.5），ER図・テーブル一覧（4章），マップ生成API連携（5.1）からアセスメントを削除 | 池田 琉俊 |
 | v1.7.0 | 2026/10/09 | 生成中に接続が切れても生成を続ける方式（Design Doc 4.2.9）に合わせ，CLIコマンド一覧（3.5）に `campass delete` を追加し，マップ生成API連携（5.1）を更新 | 池田 琉俊 |
 | v1.8.0 | 2026/10/09 | ノードの編集（ReqDef F-018）を追加．S-03 の概要（3.1）と CLIコマンド一覧（3.5）に編集を追記．現在地を進捗の履歴から導出する方式（Design Doc 4.2.8，ADR 0005）に合わせ，ER図とテーブル一覧（4章）から `maps.current_node_id` を削除して `map_progress_events` を追加 | 池田 琉俊 |
+| v1.9.0 | 2026/10/11 | リポジトリを `backend/`・`frontend/`・`cli/` に分けた構成に合わせ，2.5 リポジトリ構成を新設 | 池田 琉俊 |
 
 ---
 
@@ -113,6 +114,27 @@ graph TD
 | 表示層 | バックエンドから受け取ったマップ・コンパス・ノード詳細をターミナル向けのテキストとして出力する．コンパスなどの導出は行わない． |
 
 * CLI は Go の標準ライブラリのみで実装し，外部パッケージに依存しない．詳細は Design Doc 4.5 を参照する．
+
+### 2.5 リポジトリ構成
+
+フロントエンド・バックエンド・CLI をリポジトリのルートの別々のディレクトリに置く．
+
+```
+/
+├── backend/            バックエンド（Rails API）．Gemfile，Dockerfile など
+├── frontend/           フロントエンド（React SPA）
+├── cli/                CLI（Go）．内部の構成は Design Doc 4.5.2
+├── api/                OpenAPI を採用する場合の API 定義（openapi.yaml）．未作成
+├── docs/               要件定義書・基本設計書・Design Doc・ADR
+├── GLOSSARY.md, CLAUDE.md, README.md, .claude/, .github/
+├── docker-compose.yml
+├── .gitignore          ルートは .env だけ．Rails 用は backend/.gitignore
+└── .env                API キーなど（git の管理外）
+```
+
+* 開発環境は Docker Compose で，サブシステムごとに `backend`（Ruby），`frontend`（Node.js LTS），`cli`（Go），`db`（MySQL 8.0）のサービスを持つ．各サービスは自分のディレクトリだけを `/app` にマウントする．
+* `.env` は `backend` にだけ環境変数として渡す（5.3）．`frontend` と `cli` には渡さない．
+* API 定義に OpenAPI を採用する場合は，フロントエンドと CLI が共通で参照できるよう，ルートに `api/openapi.yaml` を置く．
 
 ---
 

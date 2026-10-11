@@ -5,7 +5,7 @@ Rules for code that calls the LLM API. Based on `docs/design_doc.md` sections 4.
 ## API keys
 
 - The LLM API key lives only in backend environment variables (`.env` → container env). They must never appear in frontend code, API responses, or source maps.
-- `gemini_comu.rb` loads `.env` through `dotenv`; Rails code should read keys from `ENV`.
+- The root `.env` reaches the `backend` container only, through Compose `env_file`; `frontend` and `cli` never get it. The file itself is not mounted, so `Dotenv.load` in `backend/gemini_comu.rb` finds nothing and the key comes from `ENV`. Rails code should read keys from `ENV`.
 
 ## Structured output
 
