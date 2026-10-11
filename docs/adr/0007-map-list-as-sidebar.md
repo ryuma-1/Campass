@@ -12,3 +12,5 @@ Learners switch between maps often (origin nodes, detours and shared nodes link 
 ## Consequences
 
 `maps.updated_at` now decides the list order and where the learner lands, so it is touched on every side effect made through the map (design_doc 4.1.2), not only when the `maps` row changes. Keeping the content of an open S-03 in sync with changes made elsewhere is a separate open issue (#24).
+
+Update (design_doc v0.18.0, #24): an open S-03 is refetched only when the learner comes back to it (`visibilitychange` to `visible` or `window` `focus`, at most once per 2 seconds), never polled or pushed, because shared nodes (ADR 0003) would make detecting changes to one map heavy for a single-user app. The sidebar's immediate list fetch uses the same trigger. Details are in design_doc 4.4.
