@@ -71,6 +71,17 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 | `GET /api/nodes?q=&map_id=` | Existing-node suggestions for editing (F-018): the user's nodes whose title matches, with `already_main` and `inside` for that map. |
 | `POST` / `PATCH` / `DELETE /api/maps/:mapId/nodes[/:nodeId]`, `POST` / `DELETE /api/maps/:mapId/paths` | Map edits (F-018): place or remove a main node, change importance, add or remove a path. Return the same body as `GET /api/maps/:id`. |
 | `PATCH /api/nodes/:id`, `POST` / `DELETE /api/nodes/:id/sub_nodes`, `POST` / `DELETE /api/nodes/:id/sub_node_paths` | Shared edits (F-018): title and summary, sub nodes, paths among sub nodes. Take the acting `map_id`. |
+| `POST /api/auth/:provider`, `GET /api/auth/:provider/callback` | Web login with `google` / `github` through omniauth (F-019). The callback finds or creates the user, adds a `web_sessions` row, sets the Cookie and redirects to `FRONTEND_ORIGIN` + `return_to`. |
+| `GET /api/session` / `DELETE /api/session` | Current user and `csrf_token` (`401` with `csrf_token` when logged out) / log out this device only. |
+
+## Authentication (F-019, `docs/design_doc.md` section 4.6)
+
+- Identify the user by the Cookie session (`web_sessions`) or a Bearer token (`api_tokens`). If the `Authorization` header is present, use only the Bearer token. Everything except the login endpoints returns `401` without a user.
+- Find the user by `user_identities (provider, provider_uid)`, never by email. Without one, merge into the user whose `email` equals the provider's **verified** email (Google `email_verified`, GitHub primary + `verified`), else create the user. No verified email → no login (`/login?error=email_not_verified`).
+- Session: random token in the Cookie, only its SHA-256 in `token_digest`; expires 30 days after last use and is extended on use. Logout deletes only that row.
+- Cookies (login and Rails session): no `Domain`, `HttpOnly`, `SameSite=Lax`, `Secure` except in development. Re-enable `ActionDispatch::Cookies` and `ActionDispatch::Session::CookieStore` for omniauth's `state`, PKCE (Google) and `return_to`; reset that session after login.
+- Cookie-session POST / PATCH / DELETE: check the Rails CSRF token and that `Origin` equals `FRONTEND_ORIGIN`, else `403 invalid_csrf`. Bearer requests skip both. CORS (`rack-cors`) allows only `FRONTEND_ORIGIN` with credentials.
+- `return_to`: accept only paths starting with `/` and not `//`; otherwise `/maps`. The redirect origin is always `FRONTEND_ORIGIN`.
 
 ## Core algorithms
 

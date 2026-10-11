@@ -36,6 +36,7 @@ graph TD
     S01["S-01 Map list<br/>/maps"]
     S02["S-02 Initial input<br/>/maps/new"]
     S03["S-03 Map screen<br/>/maps/:mapId?node=:nodeId"]
+    S05["S-05 Login<br/>/login?return_to=:path"]
 
     S01 -->|create map| S02
     S01 -->|open map| S03
@@ -43,6 +44,8 @@ graph TD
     S03 -->|make a map from a detour| S02
     S03 -->|origin node / detour entrance / back to previous map| S03
     S03 -->|back| S01
+    S01 & S02 & S03 -->|not logged in| S05
+    S05 -->|after login, back to return_to| S01 & S02 & S03
 ```
 
 ## Rules
@@ -58,4 +61,5 @@ graph TD
 - **Editing (F-018, `docs/design_doc.md` sections 4.2.10 and 4.4)**: offer editing only on `ready` maps. Add a main node from the map; while the title is typed, list `GET /api/nodes?q=&map_id=` results: `already_main` ones are shown but not selectable, ones with `inside` are selectable with an "also inside 'A'" note; choosing none creates a new node (summary optional). Edit title and summary, remove from the map, change importance (high / mid / low), and edit sub nodes and their paths from the detail panel; draw or remove a path by selecting two nodes. On `409 confirmation_required`, show the affected maps and the nodes with progress that will be deleted, and resend with `confirmed=true` only if the learner agrees. On `422 cycle`, show `message` and leave the map unchanged. Use the map or node returned by the edit as-is; never validate cycles or decide cleanup on the client. A map with no main nodes shows 「メインノードがありません．ノードを追加してください」.
 - **First visit**: on the user's first S-03 only, show three skippable hints (current position, compass, select a node).
 - **Map deletion**: show `GET /api/maps/:id/deletion_preview` first and warn that nodes started in this map stay in progress in the other maps. A `generating` map can be deleted too; add 「作成中です．削除すると作成も止まります」 to the confirmation. After deleting in this tab, go to S-01 silently. A map deleted elsewhere (other tab, CLI) is noticed by the SSE `deleted` event, a `404`, or by diffing the map list against the previous one (on showing the list and on tab focus; no polling); go to S-01 and show one notice listing all such maps (`docs/design_doc.md` section 4.4).
-- The frontend never holds or receives the LLM API key.
+- **Login (F-019, `docs/design_doc.md` section 4.6)**: on start, call `GET /api/session`; on `401`, go to S-05 `/login?return_to=<current path>`. S-05 has only 「Google でログイン」 and 「GitHub でログイン」, each a form POST to the backend's `/api/auth/google` / `/api/auth/github` carrying the CSRF token and `return_to`. Show 「確認済みのメールアドレスが必要です」 for `?error=email_not_verified`. Every `fetch` uses `credentials: 'include'` and every POST / PATCH / DELETE sends `X-CSRF-Token` (from `GET /api/session`); the SSE uses `new EventSource(url, { withCredentials: true })`. Never store a session token in JS (the login Cookie is `HttpOnly`).
+- The frontend never holds or receives the LLM API key or the OAuth secrets.
