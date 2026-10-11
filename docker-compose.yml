@@ -1,13 +1,14 @@
 services:
-  # ① Webアプリケーション側（Ruby 4.0.5 + Dockerfileビルド）
-  web:
-    build: .
+  # ① バックエンド（Ruby 4.0.5 + Rails API．backend/Dockerfile でビルド）
+  backend:
+    build: ./backend
     volumes:
-      - .:/app
+      - ./backend:/app
       - bundle_data:/usr/local/bundle  # ← 【重要！】Gemの保管庫をここに追記
     working_dir: /app
     ports:
       - "3000:3000"
+    env_file: .env  # GEMINI_API_KEY などは backend にだけ渡す
     environment:
       - DB_HOST=db
       - DB_USER=${MYSQL_USER}
@@ -18,7 +19,30 @@ services:
     tty: true
     stdin_open: true
 
-  # ② データベース側（MySQL 8.0）
+  # ② フロントエンド（Node.js LTS + React SPA．Vite の開発サーバー）
+  # API キーを渡さないため env_file は付けない．
+  # React のアプリができるまでは profiles で既定では起動しない．
+  frontend:
+    image: node:24.21.0-slim
+    profiles: ["frontend"]
+    volumes:
+      - ./frontend:/app
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    tty: true
+    stdin_open: true
+
+  # ③ CLI（Go）．既定では起動しない．例: docker compose run --rm cli go test ./...
+  # API キーを渡さないため env_file は付けない．
+  cli:
+    image: golang:1.27.2
+    profiles: ["cli"]
+    volumes:
+      - ./cli:/app
+    working_dir: /app
+
+  # ④ データベース側（MySQL 8.0）
   db:
     image: mysql:8.0
     restart: always

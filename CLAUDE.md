@@ -17,7 +17,7 @@ Campass is a learning-path recommendation app. The user enters a goal, an LLM ge
 
 ## External Packages
 
-Approved gems (see `Gemfile`): `rails` (~> 7.1.0), `mysql2`, `google-genai`, `dotenv`. Ruby 4.0.5.
+Approved gems (see `backend/Gemfile`): `rails` (~> 7.1.0), `mysql2`, `google-genai`, `dotenv`. Ruby 4.0.5.
 
 Ask the user before adding any other gem or npm package.
 
@@ -33,16 +33,26 @@ Ask the user before adding any other gem or npm package.
 
 ## Commands
 
-Everything runs through Docker Compose: `web` (Ruby 4.0.5) and `db` (MySQL 8.0). Gems are kept in the `bundle_data` volume.
+The repo is split into `backend/` (Rails API), `frontend/` (React SPA, empty for now) and `cli/` (Go CLI, empty for now). Everything runs through Docker Compose, one service per directory, each mounting its directory at `/app`:
+
+| Service | Image | Mount | Starts by default |
+| :--- | :--- | :--- | :--- |
+| `backend` | built from `backend/Dockerfile` (Ruby 4.0.5) | `./backend:/app` | yes |
+| `db` | MySQL 8.0 | — | yes |
+| `frontend` | `node:24.21.0-slim` (Node.js LTS), port 5173 | `./frontend:/app` | no (`profiles: frontend` until the React app exists) |
+| `cli` | `golang:1.27.2` | `./cli:/app` | no (`profiles: cli`) |
+
+Gems are kept in the `bundle_data` volume.
 
 ```bash
-docker compose up -d --build      # start web + db
-docker compose exec web bash      # shell in the app container (/app = repo root)
-bundle install                    # inside the container
-ruby gemini_comu.rb               # inside the container: manual Gemini API check
+docker compose up -d --build              # start backend + db
+docker compose exec backend bash          # shell in the backend container (/app = backend/)
+bundle install                            # inside the backend container
+ruby gemini_comu.rb                       # inside the backend container: manual Gemini API check
+docker compose run --rm cli go test ./... # run the CLI tests
 ```
 
-`.env` (gitignored) must define `GEMINI_API_KEY`, `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`. Compose maps the MySQL values into the `web` container as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
+`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`. It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
 
 ### Tests
 
