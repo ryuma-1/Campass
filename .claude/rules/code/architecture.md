@@ -92,4 +92,4 @@ The app's concept (and its name, Campass) is "spread out a map and check the com
 
 ## Undecided
 
-The details of F-016 / F-017, shared edits while another map is generating, preventing conflicts between concurrent edits (the last save wins for now), and cleaning up expired `api_tokens` / `web_sessions` / `cli_login_requests` rows are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+The details of F-016 / F-017, shared edits while another map is generating, when regeneration may run once nodes are saved and sent, preventing conflicts between concurrent edits (the last save wins for now), and cleaning up expired `api_tokens` / `web_sessions` / `cli_login_requests` rows are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
