@@ -60,7 +60,7 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 
 | Endpoint | Purpose |
 | :--- | :--- |
-| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `POST` takes the goal, difficulty, and `origin_node_id` or `detour_id` (F-017, F-006), creates the map as `generating` and starts the generation job (F-011). |
+| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `GET` sorts by `updated_at` desc, then `id` desc. `POST` takes the goal, difficulty, and `origin_node_id` or `detour_id` (F-017, F-006), creates the map as `generating` and starts the generation job (F-011). |
 | `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map (also while `generating`; locks the `maps` row first) / preview what deletion affects. |
 | `POST /api/goal_suggestions` | Goal candidates for vague input (F-002). Called before the map exists. |
 | `GET /api/maps/:id/generation` (SSE) | Watch generation (F-011): all saved nodes as `node` events, then new ones, then `done`, `error` or `deleted`. Reconnectable; no `Last-Event-ID`. |
@@ -106,5 +106,6 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
   - Sub node progress is recorded but ignored by the compass.
 - **Drill-down (F-007)**: sub nodes come from `sub_nodes` and are the same in every map.
 - **Difficulty (F-003)**: ライト / スタンダード / ディープ map to `max_depth` and `node_count_target`.
+- **`maps.updated_at` (design_doc 4.1.2)**: touch it on every side effect made through that map, even when the `maps` row itself does not change: generation (each node save, `status` changes including `timed_out`), progress updates from that map, and edits from that map (map edits and shared edits with that `map_id`). Never on reads, and never for progress updates or shared edits made from another map. The map list and the redirect to the latest map use it.
 - **Map deletion**: cascade `map_nodes`, `map_paths`, `detours`, `map_progress_events`; delete a node only when no map and no node references it.
 - **Editing (F-018, design_doc 4.2.10)**: only from a `ready` map (`409 map_not_ready`); lock the `maps` row first. Reject edits that make `map_paths`, `sub_node_paths` or `sub_nodes` cyclic with `422 cycle` and the cycle; never fix them silently. Removing a main node deletes its paths and detour (no rewiring), sets its events' `map_node_id` to NULL, and deletes nodes left unreferenced by the map-deletion rule. Edits that reach other maps or delete nodes with progress return `409 confirmation_required` until resent with `confirmed=true`. Importance high / mid / low is stored as 0.9 / 0.5 / 0.1. In a map made from an origin node, placing or removing a main node also changes the origin node's sub nodes.
