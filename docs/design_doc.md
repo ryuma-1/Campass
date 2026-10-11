@@ -117,6 +117,7 @@ users ──1:N── nodes ──1:N── sub_nodes（ノード → サブノ�
 users ──1:N── user_identities（連携した Google / GitHub のアカウント）
 users ──1:N── web_sessions（ブラウザのログイン）
 users ──1:N── api_tokens（CLI のトークン）
+users ──1:N── cli_login_requests（CLI のログイン要求．許可されるまで user_id は NULL）
 ```
 
 * `map_nodes` は「あるマップに置かれたメインノード」を表す．サブノードは `map_nodes` に置かず，`sub_nodes` によってどのマップでも同じものが見える．あるマップで `map_nodes` にあるノードはそのマップのメインノードであり，そうでなくサブノードとして見えるノードはそのマップのサブノードである．
@@ -173,6 +174,20 @@ users ──1:N── api_tokens（CLI のトークン）
 | `last_used_at` | DATETIME | NULLABLE | 最終利用時刻 |
 | `expires_at` | DATETIME | NOT NULL | 有効期限（期間の長さは 4.5.8 で未決） |
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
+
+**`cli_login_requests`**（CLI のログイン要求．ブラウザで許可されるのを待つ，4.5.4）
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
+| `device_code_digest` | CHAR(64) | NOT NULL, UNIQUE | `device_code` の SHA-256 ハッシュ（16進）．平文は作成時のレスポンスでのみ返し，DBには保存しない |
+| `user_code` | CHAR(9) | NOT NULL, UNIQUE | 利用者がブラウザに打つコード（`XXXX-XXXX`）．使い捨てで，同じ値を二度使わない |
+| `name` | VARCHAR(255) | NULLABLE | CLI のマシン名．S-04 の確認に出し，発行するトークンの `api_tokens.name` にする |
+| `user_id` | BIGINT UNSIGNED | FK → `users.id`, NULLABLE, INDEX | 許可したユーザー．許可されるまで NULL |
+| `status` | ENUM('pending','approved','denied','consumed') | NOT NULL, DEFAULT 'pending' | `consumed` はトークンを CLI に渡し終えた状態 |
+| `last_polled_at` | DATETIME | NULLABLE | CLI が最後にトークンを受け取りに来た時刻．間隔より早い受け取りを `slow_down` にするために使う |
+| `expires_at` | DATETIME | NOT NULL | 有効期限．作成から10分 |
+| `created_at` / `updated_at` | DATETIME | NOT NULL | `created_at` はログインを始めた時刻として S-04 に出す |
 
 **`maps`**
 
@@ -500,7 +515,7 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.5.7）から編�
 
 #### 4.3.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
-REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API を除いて `401` を返す．
+REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API（`POST /api/auth/:provider`，`GET /api/auth/:provider/callback`，`POST /api/auth/cli_login_requests`，`POST /api/auth/cli_login_requests/token`）を除いて `401` を返す．
 
 | エンドポイント | 概要 |
 | :--- | :--- |
@@ -508,7 +523,11 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 | `GET /api/auth/:provider/callback` | Google / GitHub からの戻り先（4.6）．ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する． |
 | `GET /api/session` | ログイン中のユーザーと CSRF トークンを返す（4.6）．未ログインなら `401`． |
 | `DELETE /api/session` | ログアウト．その端末のセッションだけを消す（4.6）． |
-| `POST /api/auth/tokens` | メールアドレスとパスワードで認証し，CLI 用のトークンを発行する（4.5.4）．パスワードを廃止したため（4.6），このままでは使えない．CLI のログイン方法は 9章の論点とする． |
+| `POST /api/auth/cli_login_requests` | CLI のログインを始める（4.5.4）．認証なし．CLI のマシン名 `name` を受け取り，`device_code`，`user_code`，`verification_uri`，`expires_in`，`interval` を返す． |
+| `POST /api/auth/cli_login_requests/token` | CLI がトークンを受け取りに来る（4.5.4）．認証なし．`device_code` を受け取り，許可されていればトークンを発行して返す．まだなら状態を返す． |
+| `POST /api/auth/cli_login_requests/lookup` | S-04 の確認に出す内容（端末名と開始時刻）を返す（4.4）．Web のログインが必要．`user_code` を受け取る． |
+| `POST /api/auth/cli_login_requests/approve` | CLI のログインを許可する（S-04）．Web のログインが必要．`user_code` を受け取る． |
+| `POST /api/auth/cli_login_requests/deny` | CLI のログインを拒否する（S-04）．Web のログインが必要．`user_code` を受け取る． |
 | `DELETE /api/auth/tokens/current` | リクエストに使ったトークンを失効させる（4.5.4）． |
 | `GET /api/maps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． |
 | `POST /api/maps` | マップを作り，同時に生成を開始する（F-011）．ゴールと難易度を受け取り，元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）．マップは `generating` で作られ，生成ジョブ（4.2.9）を起動して `201` を返す．生成の様子は `GET /api/maps/:id/generation` で受け取る． |
@@ -569,15 +588,81 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 * `csrf_token` は Rails 標準の CSRF トークンである．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` ヘッダーとして付ける（4.6）．未ログインでも返すのは，S-05 のログインのフォーム送信（`POST /api/auth/:provider`）に必要なためである．
 * CSRF トークンがない・合わない，または `Origin` が `FRONTEND_ORIGIN` と一致しない書き込みには `403`（`code`: `invalid_csrf`）を返す（4.6）．
 
-**`POST /api/auth/tokens` リクエスト／レスポンス例**
+**`POST /api/auth/cli_login_requests` リクエスト／レスポンス例**
 
 ```json
-{ "email": "user@example.com", "password": "********", "name": "my-laptop" }
+{ "name": "my-laptop" }
 ```
+
+```json
+{
+  "device_code": "Gm2x...",
+  "user_code": "WDJB-MJHT",
+  "verification_uri": "https://app.campass.example.com/cli/activate",
+  "expires_in": 600,
+  "interval": 5
+}
+```
+
+* `device_code` は CLI だけが知るランダムな長い値で，DB には SHA-256 ハッシュだけを保存する（4.1.2）．
+* `verification_uri` は `FRONTEND_ORIGIN` + `/cli/activate` とする．`user_code` は URL に含めない（4.5.4）．
+
+**`POST /api/auth/cli_login_requests/token` リクエスト／レスポンス例**
+
+```json
+{ "device_code": "Gm2x..." }
+```
+
+許可された場合（`200`）．形は CLI のトークンの発行として共通である:
 
 ```json
 { "token": "cmp_3f9a...", "expires_at": "2027-01-04T10:00:00+09:00" }
 ```
+
+まだトークンを渡せない場合は `400` で，`code` に RFC 8628 と同じ状態を返す:
+
+```json
+{ "code": "authorization_pending", "message": "ブラウザでの許可を待っています．" }
+```
+
+```json
+{ "code": "slow_down", "message": "受け取りの間隔が短すぎます．" }
+```
+
+```json
+{ "code": "access_denied", "message": "ログインが拒否されました．" }
+```
+
+```json
+{ "code": "expired_token", "message": "期限切れです．もう一度 campass login を実行してください．" }
+```
+
+| `code` | 返す条件 |
+| :--- | :--- |
+| `authorization_pending` | `pending` で期限内．まだ許可も拒否もされていない |
+| `slow_down` | 前回の受け取り（`last_polled_at`）から `interval` 秒たっていない．`slow_down` を返したときも `last_polled_at` を更新する |
+| `access_denied` | `denied` |
+| `expired_token` | 期限切れ，すでに `consumed`，または `device_code` に一致する要求がない |
+
+* トークンは，許可されたときではなく，CLI がこの API で受け取りに来たときに作る．`approved` の要求の行をロックし，`api_tokens` に1行足して要求を `consumed` にするまでを1つのトランザクションで行う．トークンの平文はこのレスポンスでだけ返し，2回目以降は `expired_token` になる．
+* `message` は他のエラーと同じく「コード→文言」の対応表から作る．
+
+**`POST /api/auth/cli_login_requests/lookup` / `approve` / `deny` リクエスト／レスポンス例**
+
+```json
+{ "user_code": "WDJB-MJHT" }
+```
+
+`lookup` のレスポンス（`200`）:
+
+```json
+{ "name": "my-laptop", "created_at": "2026-10-11T10:00:00+09:00" }
+```
+
+* `approve` は要求に `user_id` を入れて `approved` に，`deny` は `denied` にし，どちらも `204` を返す．
+* 3つとも，`user_code` に一致する要求がない，期限切れ，`pending` でない場合は `404`（`code`: `invalid_user_code`）を返す．
+* `user_code` は前後の空白を除き，大文字にそろえ，ハイフンがなくても受け付ける．
+* 3つとも Web のログイン（Cookie セッション，4.6）でだけ受け付け，Bearer トークンのリクエストには `401` を返す．書き込みと同じく CSRF トークンと `Origin` を確かめる．`user_code` を URL に残さないため，`lookup` も POST とする．
 
 **`GET /api/maps` レスポンス例**
 
@@ -812,6 +897,7 @@ ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロン
 | S-01 マップ一覧 | `/maps` | マップを平らに並べる．元ノードや寄り道から作ったマップには「Ruby の『オブジェクト指向』から」「Ruby の『Web アプリ開発』からの寄り道」のような注記を付ける（入れ子にはしない．マップ間ノードにより複数の親を持ち得るため）．生成の状態の示し方は下の「生成の状態」に従う． |
 | S-02 初期入力 | `/maps/new` | 興味，ゴール，難易度．寄り道から作る場合は寄り道のテーマを興味として入力済みにする． |
 | S-03 マップ画面 | `/maps/:mapId` | ノードを選んでいる状態は `?node=:nodeId` で表し，ブラウザの戻る・再読み込みで選択を保つ．ドリルダウンも同じパラメータで表す． |
+| S-04 CLI ログインの承認 | `/cli/activate` | `campass login` が表示したコードを入力し，CLI のログインを許可・拒否する（4.5.4）．内容は下の「CLI ログインの承認（S-04）」に従う． |
 | S-05 ログイン | `/login?return_to=:path` | 「Google でログイン」「GitHub でログイン」の2つのボタンだけを置く（F-019）．未ログインでどの画面を開いてもここへ移り，ログイン後は `return_to` の画面へ戻る．ログインに失敗して戻った場合は理由を示す（4.6）． |
 
 **生成から最初の表示まで**
@@ -875,6 +961,14 @@ ReqDef 5.1 が求める「認知負荷の軽減」を満たすため，フロン
 * 気づいたら S-01 へ移り，別の場所で削除されたマップをまとめて1つのお知らせで示す（「別の画面で次のマップが削除されました：…」．OK で閉じる）．マップごとにお知らせを出さない．エラーではないため，警告アイコンは使わない．
 * 削除を知らせるためのプッシュやポーリングは行わない．アプリを閉じている間に削除されたマップは知らせない（比べる前回の一覧がないため）．
 
+**CLI ログインの承認（S-04）**
+
+1. 未ログインで `/cli/activate` を開くと，他の画面と同じく S-05 `/login?return_to=/cli/activate` へ移り，ログイン後に `/cli/activate` へ戻る（4.6）．
+2. コードの入力欄を1つ置く．「ターミナルに表示されたコードを入力してください」と添える．URL からコードを受け取って入力済みにすることはしない（4.5.4）．
+3. 入力したら `POST /api/auth/cli_login_requests/lookup` を呼び，確認画面に端末名（`name`．なければ「名前のない端末」）と開始時刻（`created_at`）を出す（例：「my-laptop からのログイン（10:00 に開始）を許可しますか？」）．「自分で `campass login` を実行していない場合は拒否してください」と添え，「許可」「拒否」を選ばせる．
+4. 「許可」は `…/approve`，「拒否」は `…/deny` を呼ぶ．終わったら「ログインを許可しました．ターミナルに戻ってください」または「ログインを拒否しました」を表示する．
+5. `404 invalid_user_code` が返ったら「コードが正しくないか，期限が切れています」と表示し，入力し直せるようにする．
+
 ### 4.5 CLI設計（F-014）
 
 #### 4.5.1 方針
@@ -915,7 +1009,30 @@ cli/
 
 #### 4.5.4 認証
 
-* `campass login` はメールアドレスとパスワードを入力させ，`POST /api/auth/tokens` でトークンを取得する．バックエンドはトークンの SHA-256 ハッシュのみを `api_tokens` に保存し，平文はこのレスポンスでのみ返す．ただし，Web のログインを Google / GitHub だけにしてパスワードを廃止したため（4.6），この方式は使えない．CLI のログイン方法は 9章の論点とする．
+CLI はパスワードを扱わない．`campass login` は，ブラウザで Web にログインして許可してもらう方式（RFC 8628 のデバイスコード方式）でトークンを受け取る．Web のログイン方法には依存せず，Web にログインページがあることだけを前提とする．方式を選んだ理由は 5.12 に示す．
+
+1. `campass login` は `POST /api/auth/cli_login_requests`（認証なし）を呼ぶ．`name` には `os.Hostname()` で取ったマシン名を入れる．レスポンスは `device_code`，`user_code`，`verification_uri`，`expires_in`，`interval`（4.3.1）．
+2. CLI は `verification_uri` と `user_code` を表示し，ブラウザを開こうとする（`os/exec` で macOS は `open`，Linux は `xdg-open`，Windows は `rundll32 url.dll,FileProtocolHandler` を呼ぶ）．開けなければ，表示した URL を手で開くよう案内する．
+
+   ```
+   ブラウザで次の URL を開き，コードを入力してください．
+     URL:    https://app.campass.example.com/cli/activate
+     コード: WDJB-MJHT
+   ```
+
+3. 利用者はブラウザで S-04 `/cli/activate` を開き，コードを入力して，端末名と開始時刻を確かめてから許可する（4.4）．未ログインなら S-05 でログインしてから戻る．
+4. CLI は `interval` 秒（5秒）ごとに `POST /api/auth/cli_login_requests/token`（認証なし）に `device_code` を送る．
+   * `authorization_pending`：そのまま待つ．
+   * `slow_down`：間隔を5秒延ばして待つ．
+   * `access_denied`：「ログインが拒否されました」と表示して終わる．
+   * `expired_token`：「期限切れです．もう一度 `campass login` を実行してください」と表示して終わる．
+   * `200`：`token` と `expires_at` を受け取り，下のとおり保存して終わる．
+5. 待っている間に Ctrl+C を押されたら（`os/signal` で受け取る），改行を出して終了コード 130 で終わる．端末の設定は変えていないため，元に戻す処理は要らない．
+
+* `verification_uri` に `user_code` を含めない．含めると，他人が自分の端末で始めたログインのリンクを踏ませて「許可」させるフィッシングが成り立つためである．利用者が自分のターミナルに表示されたコードを打つことで，許可するのが自分の端末だと確かめさせる．
+* `user_code` は8文字の `XXXX-XXXX` とし，打ち間違えやすい文字（`0`/`O`，`1`/`I` など）と数字・母音を避けた20文字（`BCDFGHJKLMNPQRSTVWXZ`）から作る．使い捨てで，同じ値を二度使わない．
+* ログイン要求の有効期限は10分とする（`expires_in` = 600）．
+* トークンは，許可されたときではなく，CLI が受け取りに来たときに作る（4.3.1）．一度だけ返し，要求を `consumed` にする．バックエンドはトークンの SHA-256 ハッシュのみを `api_tokens` に保存し，平文は保存しない．`api_tokens.name` には要求の `name` を入れる．
 * CLI はトークンを `os.UserConfigDir()` 配下の `campass/credentials.json` に，所有者のみ読み書きできる権限（0600）で保存する．
 * 以後のリクエストには `Authorization: Bearer <token>` を付ける．`401` が返った場合は `campass login` のやり直しを促す．
 * `campass logout` は `DELETE /api/auth/tokens/current` でトークンを失効させてから，ローカルのファイルを削除する．
@@ -985,7 +1102,7 @@ campass importance  <map_id> <node_id> high|mid|low
 
 #### 4.5.8 未決事項
 
-CLI に関わる未決事項は 9章にまとめる（認証まわり，配布方法）．生成中の中断（Ctrl+C）の扱いは 4.2.9 と 4.5.3 で決めた．
+CLI に関わる未決事項は 9章にまとめる（トークンの有効期限，配布方法）．生成中の中断（Ctrl+C）の扱いは 4.2.9 と 4.5.3 で決めた．
 
 ### 4.6 Web の認証（F-019）
 
@@ -1017,7 +1134,7 @@ CLI に関わる未決事項は 9章にまとめる（認証まわり，配布�
 * フロントエンドのオリジンは環境変数 `FRONTEND_ORIGIN` で持つ．
 * **Cookie の属性**: ログインの Cookie と Rails 標準のセッションの Cookie は，`Domain` 属性を付けず `api.` にだけ付く．`HttpOnly`・`Secure`・`SameSite=Lax` とする．`Secure` は開発環境（`http://localhost`）でだけ外す．`Strict` にしないのは，Google / GitHub から `api.` のコールバックへ戻る遷移で Rails 標準のセッションの Cookie（`state`）が送られる必要があるためである．
 * **CORS**: `rack-cors` で，`FRONTEND_ORIGIN` だけを Cookie つき（`credentials`）で許可する．許可するメソッドは GET / POST / PATCH / DELETE，ヘッダーは `Content-Type` と `X-CSRF-Token` とする．
-* **CSRF**: Rails 標準の CSRF トークンを `GET /api/session` のレスポンス本文で返す（4.3.1）．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` を付ける．加えて，書き込み系では `Origin` ヘッダーが `FRONTEND_ORIGIN` と一致するかを確かめる．どちらかが合わなければ `403`（`invalid_csrf`）を返す．Bearer トークンのリクエストは CSRF の検査の対象外とする（ブラウザが他のサイトから勝手に付けることはできないため）．
+* **CSRF**: Rails 標準の CSRF トークンを `GET /api/session` のレスポンス本文で返す（4.3.1）．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` を付ける．加えて，書き込み系では `Origin` ヘッダーが `FRONTEND_ORIGIN` と一致するかを確かめる．どちらかが合わなければ `403`（`invalid_csrf`）を返す．Bearer トークンのリクエストは CSRF の検査の対象外とする（ブラウザが他のサイトから勝手に付けることはできないため）．認証なしの CLI のログイン要求の作成と受け取り（`POST /api/auth/cli_login_requests`，`…/token`，4.5.4）も Cookie を使わないため対象外とする．
 * **クライアント**: SPA は `fetch` に `credentials: 'include'` を付け，SSE は `new EventSource(url, { withCredentials: true })` でつなぐ（4.3.1）．
 * **開発環境**: React（`localhost:5173`）と Rails（`localhost:3000`）を別オリジンのまま動かし，`FRONTEND_ORIGIN=http://localhost:5173` として本番と同じ CORS の設定で開発する．ポートが違ってもサイトは同じなので，`SameSite=Lax` の Cookie は送られる．
 * Google / GitHub のクライアントID・シークレット（`GOOGLE_CLIENT_ID`，`GOOGLE_CLIENT_SECRET`，`GITHUB_CLIENT_ID`，`GITHUB_CLIENT_SECRET`）は，LLM APIのキーと同じくバックエンドの環境変数でだけ持ち，フロントエンドには渡さない．
@@ -1100,6 +1217,8 @@ CLI に関わる未決事項は 9章にまとめる（認証まわり，配布�
 * **案B（不採用）**: フロントエンドと同じ Cookie セッションを CLI でも使う．
   * 利点: バックエンドの認証の仕組みを1つにできる．
   * 欠点: CLI 側で Cookie と CSRF 対策を扱う必要があり，実装が複雑になる．
+
+トークンを受け取るまでのログインの方法は 5.12 で比べる．
 
 ### 5.7 マップ間の関係：ノードの共有 vs リンク（ADR 0003）
 
@@ -1203,12 +1322,28 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
   * 利点: テーブルとトークンを確かめる処理を1つにできる．
   * 欠点: Web のセッションと CLI のトークンは，発行のしかた（Cookie か，レスポンスで渡すか），CSRF の検査の有無，`user_agent` と `name` のように持つ情報が違い，条件分岐が増える．
 
+### 5.12 CLI のログイン：パスワード入力 vs ローカルへのリダイレクト vs デバイスコード
+
+Web のログインを Google / GitHub だけにしてパスワードを廃止したため（4.6），`campass login` がトークンを受け取る方法を比べた（4.5.4）．
+
+* **案A（不採用）**: CLI でメールアドレスとパスワードを入力させる（v0.13.0 までの設計）．
+  * 利点: ブラウザが要らず，ターミナルだけで済む．
+  * 欠点: Campass はパスワードを持たないため，そもそも使えない．仮にパスワードを残しても，入力中に表示しないためのエコー制御を OS ごとに書く必要があり，標準ライブラリだけでは Windows を含めて扱いにくい．
+* **案B（不採用）**: CLI が `localhost` で一時的な HTTP サーバーを立て，ブラウザでのログイン後にそこへリダイレクトさせてトークンを渡す．
+  * 利点: 利用者はブラウザでログインするだけで，コードを打たなくてよい．
+  * 欠点: CLI と同じマシンでブラウザを開く必要があり，SSH 先やコンテナの中では使えない．ポートの確保，リダイレクト先の検証，`state` の確認を CLI とバックエンドの両方で書く必要がある．
+* **案C（採用）**: RFC 8628 のデバイスコード方式．CLI が表示したコードを，利用者がブラウザの S-04 に入力して許可する．
+  * 利点: ブラウザは別のマシンでもよいため，SSH 先やコンテナの中でも使える．CLI はパスワードを扱わず，エコー制御が要らない．Web のログイン方法（Google / GitHub など）が変わっても CLI は変わらない．CLI 側は標準ライブラリ（`net/http`，`os/exec`，`os/signal`）だけで書ける．
+  * 欠点: 利用者がコードを打つ手間がある．ログイン要求のテーブル（`cli_login_requests`），4つの API と照会の API，S-04 の画面が増える．
+  * URL にコードを含めないのは，フィッシングを防ぐためである．含めると，攻撃者が自分の端末でログインを始め，そのリンクを利用者に踏ませて「許可」させれば，攻撃者の CLI が利用者のトークンを受け取れてしまう．利用者に自分のターミナルのコードを打たせることで，自分が始めたログインだけを許可させる．
+
 ## 6. 懸念事項（Caveats / Security / Privacy Concerns）
 
 * **APIキーの秘匿化**: 外部LLM APIキーは必ずバックエンド（サーバーサイド）で管理し，フロントエンドへ絶対に露出させない．環境変数またはシークレットマネージャで管理し，リポジトリへのコミットを防ぐ仕組み（lint / pre-commit hook 等）を導入する（ReqDef 5.3）．
 * **学習データへの利用オプトアウト**: ユーザーの自由記述ワーク（興味・ゴールの入力等）に個人情報や機密情報が含まれる可能性があるため，LLM API呼び出し時には「モデル学習への非利用（オプトアウト）」設定を必須パラメータとし，リクエスト送信前にこの設定が有効であることをバックエンド側でバリデーションする（ReqDef 5.3）．
 * **Web のログイン**: Cookie は `HttpOnly`・`Secure`・`SameSite=Lax` とし，CSRF トークンと `Origin` の確認，`FRONTEND_ORIGIN` だけを許す CORS，`return_to` の制限でクロスサイトからの書き込みとオープンリダイレクトを防ぐ．確認していないメールアドレスではユーザーをまとめない（4.6）．
 * **CLI のトークン管理**: CLI のトークンはユーザーの端末にファイルとして保存されるため，所有者のみ読み書きできる権限（0600）で保存し，有効期限を設ける．`campass logout` で失効でき，DBにはハッシュのみを保存する（4.5.4）．
+* **CLI のログイン**: `device_code` は DB にハッシュだけを保存し，トークンは CLI が受け取りに来たときに一度だけ渡す．`verification_uri` に `user_code` を含めず，S-04 で端末名と開始時刻を見せてから許可させることで，他人が始めたログインを許可させるフィッシングを防ぐ（4.5.4，5.12）．
 * **プロンプトインジェクション対策**: ユーザーの自由入力がそのままLLMへのプロンプトに埋め込まれるため，システムプロンプトとユーザー入力を明確に分離し，構造化出力（JSON Schema／ツール呼び出し）を強制することで，意図しない指示の混入や出力形式の破壊を防ぐ．
 * **マップのデータ保持**: マップ，ノードおよび学習ログはユーザーが自ら削除するか退会するまで永続保持する方針のため，退会時のデータ削除フロー（物理削除 or 論理削除）を別途明確にする必要がある（ReqDef 5.4）．
 * **既存ノードの送信**: マップ生成のたびにユーザーの既存ノードのタイトルをLLMに送る．他ユーザーのノードは送らず，オプトアウト設定は他のリクエストと同じく必須とする．
@@ -1249,6 +1384,8 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
   * `FRONTEND_ORIGIN` 以外のオリジンからのリクエストに，CORS の許可（`Access-Control-Allow-Origin`）が返らないこと．
   * DB に保存されるのがセッショントークンのハッシュだけで，平文が残らないこと．
 * **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．ノードの編集については，`409 confirmation_required` で `y/N` の確認を出し，`y` のときだけ `confirmed=true` で送り直すこと，`--new` を付けると提案を出さないことを検証する．トークンファイルが 0600 で保存されることも確認する．
+  * ログイン（4.5.4）については，テスト用サーバーに `…/token` の応答を順に返させ，`authorization_pending` では `interval` ごとに受け取りを続けること，`slow_down` で間隔が5秒延びること，`access_denied` と `expired_token` でそれぞれの文言を表示して終わること，`200` でトークンを保存すること，待っている間の Ctrl+C で改行を出して終了コード 130 で終わることを検証する．待つ時間は差し替えられるようにし，テストで実際に待たない．ブラウザを開けなくても URL とコードが表示されることも確認する．
+* **CLI のログインのテスト**（バックエンド，4.3.1）: `…/token` が4つの状態と成功を条件どおりに返すこと，トークンが一度だけ返り2回目は `expired_token` になること，DB に `device_code` とトークンの平文が残らないこと，`approve` / `deny` / `lookup` が Web のログインなしや Bearer トークンでは `401`，期限切れや `pending` でない要求では `404` になることを検証する．
 * **負荷テスト**: ReqDef 5.2 の想定同時接続数（通常100 DAU，ピーク1,000 DAU）を基準としたマップ生成APIの負荷試験．
 
 ## 8. 運用・段階的リリース計画
@@ -1267,7 +1404,6 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
 * **生成中のマップと共有の編集**: 編集は `ready` のマップからだけ行えるが，内容やサブノードは共有のため，同じノードを再利用している別のマップが生成中のことがある．ユーザーがサブノードを外して削除した直後に，生成ジョブがそのノードを参照すると，未知の参照（4.2.4）として生成が失敗し得る．初期リリースでどこまで対処するか．
 * LLM生成コンテンツの品質担保（幻覚対策）について，将来的にファクトチェック機構やユーザーフィードバックによる品質改善ループを設けるか．
 * **CLI トークンの有効期限**: `api_tokens.expires_at` に設定する期間と，期限切れ時の扱い．
-* **CLI のログイン方法**: パスワードを廃止したため（4.6），`campass login` のメールアドレスとパスワードでの方式（4.5.4）は使えない．Web のログインを使う方式に変える必要がある．
 * **CLI の配布方法**: 実行ファイルの配布先（GitHub Releases 等）とバージョン管理．
 
 ## 10. 変更履歴
@@ -1289,3 +1425,4 @@ v0.11.1 までは案A を採用していた．ノードの編集（F-018）で�
 | v0.12.0 | 2026/10/09 | ノードの編集（ReqDef F-018）を追加し，4.2.10 を新設．現在地を `maps.current_node_id` から，マップごとの進捗の履歴（`map_progress_events`）による導出に変更し（ADR 0005），5.9 の採否を見直した．同じマップでメインノードが別のメインノードの中にも現れることを許すと明記（ADR 0006）．4.1，4.2.4，4.2.8（現在地，空のマップ），4.3.1（編集 API，`also_inside`，確認と循環のエラー），4.4，4.5（CLI の編集コマンドを 4.5.7 に追加し，未決事項を 4.5.8 へ），7〜9章を整合 | 池田 琉俊 |
 | v0.12.1 | 2026/10/11 | リポジトリを `backend/`・`frontend/`・`cli/` に分けた構成（基本設計書 2.5）に合わせ，4.5.2 に `cli/` の置き場所と Docker Compose の `cli` サービスを追記 | 池田 琉俊 |
 | v0.13.0 | 2026/10/11 | Web のログイン（ReqDef F-019）を決定し，4.6 Web の認証を新設（Google / GitHub でのログイン，DB に置く Cookie セッション，`app.` / `api.` の別オリジン，CSRF・CORS・`return_to` の制限）．4.1 で `users.password_digest` を削除し `user_identities` と `web_sessions` を追加．4.3.1 にログイン・セッションの API を追加し，ブラウザの SSE の認証を Cookie セッションに決定．4.4 に S-05 ログイン画面を追加．パスワードの廃止に合わせて 4.5.4 に注記し，5.11 を新設，6・7章に Web の認証を追加．9章からフロントエンドの認証方式を削除し，CLI のパスワード入力の論点を CLI のログイン方法に置き換えた | 池田 琉俊 |
+| v0.14.0 | 2026/10/11 | CLI のログインをデバイスコード方式（ブラウザで許可）に決定．4.1 に `cli_login_requests` を追加し，4.3.1 で `POST /api/auth/tokens` を廃止して CLI のログイン要求の API（作成・受け取り・照会・許可・拒否）を追加．4.4 に S-04 CLI ログインの承認を追加し，4.5.4 を書き直し，4.6 で CSRF の検査の対象外に CLI のログイン要求の作成と受け取りを加えた．4.5.8 の未決事項を更新．5.12 を新設し，6・7章に CLI のログインを追加．9章から CLI のログイン方法を削除 | 池田 琉俊 |

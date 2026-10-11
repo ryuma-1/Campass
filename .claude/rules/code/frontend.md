@@ -36,6 +36,7 @@ graph TD
     S01["S-01 Map list<br/>/maps"]
     S02["S-02 Initial input<br/>/maps/new"]
     S03["S-03 Map screen<br/>/maps/:mapId?node=:nodeId"]
+    S04["S-04 CLI login approval<br/>/cli/activate"]
     S05["S-05 Login<br/>/login?return_to=:path"]
 
     S01 -->|create map| S02
@@ -44,8 +45,8 @@ graph TD
     S03 -->|make a map from a detour| S02
     S03 -->|origin node / detour entrance / back to previous map| S03
     S03 -->|back| S01
-    S01 & S02 & S03 -->|not logged in| S05
-    S05 -->|after login, back to return_to| S01 & S02 & S03
+    S01 & S02 & S03 & S04 -->|not logged in| S05
+    S05 -->|after login, back to return_to| S01 & S02 & S03 & S04
 ```
 
 ## Rules
@@ -62,4 +63,5 @@ graph TD
 - **First visit**: on the user's first S-03 only, show three skippable hints (current position, compass, select a node).
 - **Map deletion**: show `GET /api/maps/:id/deletion_preview` first and warn that nodes started in this map stay in progress in the other maps. A `generating` map can be deleted too; add 「作成中です．削除すると作成も止まります」 to the confirmation. After deleting in this tab, go to S-01 silently. A map deleted elsewhere (other tab, CLI) is noticed by the SSE `deleted` event, a `404`, or by diffing the map list against the previous one (on showing the list and on tab focus; no polling); go to S-01 and show one notice listing all such maps (`docs/design_doc.md` section 4.4).
 - **Login (F-019, `docs/design_doc.md` section 4.6)**: on start, call `GET /api/session`; on `401`, go to S-05 `/login?return_to=<current path>`. S-05 has only 「Google でログイン」 and 「GitHub でログイン」, each a form POST to the backend's `/api/auth/google` / `/api/auth/github` carrying the CSRF token and `return_to`. Show 「確認済みのメールアドレスが必要です」 for `?error=email_not_verified`. Every `fetch` uses `credentials: 'include'` and every POST / PATCH / DELETE sends `X-CSRF-Token` (from `GET /api/session`); the SSE uses `new EventSource(url, { withCredentials: true })`. Never store a session token in JS (the login Cookie is `HttpOnly`).
+- **CLI login approval (S-04, `docs/design_doc.md` section 4.4)**: one input for the code shown by `campass login`; never prefill it from the URL. On submit, call `POST /api/auth/cli_login_requests/lookup` and show the device `name` (「名前のない端末」 if null) and start time (`created_at`) with 「許可」 / 「拒否」 and a note to deny if the learner did not run `campass login` themselves. Then call `…/approve` or `…/deny` and show 「ログインを許可しました．ターミナルに戻ってください」 or 「ログインを拒否しました」. On `404 invalid_user_code`, show 「コードが正しくないか，期限が切れています」 and let the learner retry.
 - The frontend never holds or receives the LLM API key or the OAuth secrets.
