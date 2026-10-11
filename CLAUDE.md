@@ -56,7 +56,7 @@ ruby gemini_comu.rb                       # inside the backend container: manual
 docker compose run --rm cli go test ./... # run the CLI tests
 ```
 
-`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER` (`gemini`), `LLM_MODEL` (`gemini-3.1-flash-lite`), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development). It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
+`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development). It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
 
 ### Tests
 

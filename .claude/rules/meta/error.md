@@ -4,7 +4,7 @@
 
 - Before proposing a fix, explain the root cause.
 - Never swallow errors silently. A `rescue` must log the error or re-raise it.
-- Rescue specific exception classes (e.g. `Google::Genai::APIError`) before any generic `rescue => e`.
+- Rescue specific exception classes (e.g. `Faraday::TimeoutError`) before any generic `rescue => e`.
 
 ## LLM / streaming failures
 

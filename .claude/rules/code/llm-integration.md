@@ -19,9 +19,9 @@ Rules for code that calls the LLM API. Based on `docs/design_doc.md` sections 4.
 From the prototype (branch `prototype/llm-map-generation`, never merged). These hold for both structured output and the tool-calling approach under discussion in #26.
 
 - `from` lists only prerequisites the learner cannot understand the node without. Nodes that can be learned in parallel stay parallel; do not chain them.
-- The last main node is the goal. A main node that cannot reach the goal by paths is a validation error; the prompt forbids it too.
+- For validation at generation time only, the last main node in the output counts as the goal node. A main node that cannot reach it by paths is a validation error; the prompt forbids it too. No order or goal node is stored (goal reached still means every main node is completed).
 - Tell the LLM "at least N and at most M main nodes" from `node_count_target`; a count outside the range is a validation error. Also give the sub node count guide for the difficulty (not validated).
-- Do not force three-way branches. Gemini expresses parallel learning with several start nodes instead.
+- Do not force three-way branches. Gemini expresses parallel learning with several main nodes that have an empty `from` instead.
 - A reused node may be written with its full contents. Saving ignores existing `sub_nodes` / `sub_node_paths`, adds only new ones, and never deletes any. A new path that makes a cycle is a validation error.
 
 Specific to structured output (Gemini):
