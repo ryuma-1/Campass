@@ -92,4 +92,4 @@ The app's concept (and its name, Campass) is "spread out a map and check the com
 
 ## Undecided
 
-The details of F-016 / F-017, the CLI login method (passwords were removed), and shared edits while another map is generating are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+The details of F-016 / F-017, the CLI token lifetime, and shared edits while another map is generating are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
