@@ -57,7 +57,7 @@ See `llm-integration.md` for LLM call rules and `../meta/error.md` for failure h
 
 ## API endpoints
 
-Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
+Shapes (parameters, request and response JSON, status codes, error codes, SSE event `data`) are defined in `api/openapi.yaml`; behaviour and reasons in `docs/design_doc.md` section 4.3.1. Change both in the same change. Backend tests check requests and responses against `api/openapi.yaml` with `committee` (design_doc section 7).
 
 | Endpoint | Purpose |
 | :--- | :--- |

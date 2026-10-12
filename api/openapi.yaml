@@ -1,0 +1,1785 @@
+# API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラー）の正．
+# 振る舞いと理由の正は docs/design_doc.md 4.3.1．API の形を変えるときは，この文書と 4.3.1 を同じ変更で直す．
+# examples / example は書かない（正はスキーマだけ）．format は date-time 以外を使わない．
+openapi: 3.1.0
+info:
+  title: Campass API
+  version: 0.1.0
+  description: |
+    Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いと理由は docs/design_doc.md 4.3.1 を参照する．
+    ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（design_doc 4.6）．
+    Cookie セッションの書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` が要り，`Origin` が `FRONTEND_ORIGIN` と一致しなければならない．合わなければ `403 invalid_csrf`．
+    SSE（`GET /api/maps/{id}/generation`）は OpenAPI 3.1 では本文を文字列としてしか書けないため，各イベントの `data` の形を `components/schemas` に置き，説明文から参照する．使うツール（Prism，committee，openapi-typescript，oapi-codegen）が対応していると確かめられたら OpenAPI 3.2 に上げ，`itemSchema` で書いてよい．
+
+tags:
+  - name: auth
+    description: Web のログイン（F-019）と CLI のログイン
+  - name: llm_credential
+    description: 自分の LLM API キー（F-020）
+  - name: maps
+    description: マップ（F-011，F-012，F-013）
+  - name: nodes
+    description: ノードとドリルダウン（F-007，F-010）
+  - name: editing
+    description: ノードの編集（F-018）
+
+paths:
+  # ---------------------------------------------------------------- auth
+  /api/auth/{provider}:
+    post:
+      operationId: startWebLogin
+      tags: [auth]
+      summary: Web のログインを始める
+      description: SPA の CSRF トークン付きのフォーム送信で呼び，Google / GitHub のログイン画面へ転送する．
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebLoginForm'
+      responses:
+        '302':
+          description: Google / GitHub のログイン画面へ転送する．
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/auth/{provider}/callback:
+    get:
+      operationId: webLoginCallback
+      tags: [auth]
+      summary: Google / GitHub からの戻り先
+      description: |
+        ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する．
+        失敗したら `FRONTEND_ORIGIN` + `/login?error=:code`（`email_not_verified` / `auth_failed`）へ転送する．
+        クエリは Google / GitHub が付けるもの（`code`，`state` など）で，omniauth が扱う．
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      responses:
+        '302':
+          description: フロントエンドへ転送する．成功時はログインの Cookie を付ける．
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            Set-Cookie:
+              description: 成功時のログインの Cookie．
+              schema:
+                type: string
+
+  /api/session:
+    get:
+      operationId: getSession
+      tags: [auth]
+      summary: ログイン中のユーザーと CSRF トークン
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      responses:
+        '200':
+          description: ログイン中．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      operationId: deleteSession
+      tags: [auth]
+      summary: ログアウト（その端末のセッションだけを消す）
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        2XX:
+          description: ログアウトした．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/auth/cli_login_requests:
+    post:
+      operationId: createCliLoginRequest
+      tags: [auth]
+      summary: CLI のログインを始める
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliLoginRequestCreate'
+      responses:
+        2XX:
+          description: ログイン要求を作った．ステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliLoginRequestCreated'
+
+  /api/auth/cli_login_requests/token:
+    post:
+      operationId: pollCliLoginToken
+      tags: [auth]
+      summary: CLI がトークンを受け取りに来る
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliLoginTokenRequest'
+      responses:
+        '200':
+          description: 許可されていた．トークンを一度だけ返す．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenIssued'
+        '400':
+          description: まだトークンを渡せない（RFC 8628 の状態）．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliLoginTokenError'
+
+  /api/auth/cli_login_requests/lookup:
+    post:
+      operationId: lookupCliLoginRequest
+      tags: [auth]
+      summary: S-04 の確認に出す内容（端末名と開始時刻）
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCodeRequest'
+      responses:
+        '200':
+          description: 要求がある．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliLoginRequestLookup'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvalidUserCode'
+
+  /api/auth/cli_login_requests/approve:
+    post:
+      operationId: approveCliLoginRequest
+      tags: [auth]
+      summary: CLI のログインを許可する
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCodeRequest'
+      responses:
+        '204':
+          description: 許可した．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvalidUserCode'
+
+  /api/auth/cli_login_requests/deny:
+    post:
+      operationId: denyCliLoginRequest
+      tags: [auth]
+      summary: CLI のログインを拒否する
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCodeRequest'
+      responses:
+        '204':
+          description: 拒否した．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvalidUserCode'
+
+  /api/auth/tokens/current:
+    delete:
+      operationId: revokeCurrentToken
+      tags: [auth]
+      summary: リクエストに使ったトークンを失効させる（CLI のログアウト）
+      security:
+        - bearerToken: []
+      responses:
+        2XX:
+          description: 失効させた．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------- llm_credential
+  /api/llm_providers:
+    get:
+      operationId: listLlmProviders
+      tags: [llm_credential]
+      summary: 自分の LLM API キーに選べる会社とモデルの候補
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      responses:
+        '200':
+          description: 実装済みの会社とモデルの候補．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProviders'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/llm_credential:
+    get:
+      operationId: getLlmCredential
+      tags: [llm_credential]
+      summary: 自分の LLM API キーの設定の状態
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      responses:
+        '200':
+          description: 設定の状態．未設定なら `llm_credential` が `null`．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmCredentialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: putLlmCredential
+      tags: [llm_credential]
+      summary: 自分の LLM API キーを確かめてから保存する
+      description: Bearer トークンのリクエストには `401` を返す．確かめられなければ保存せず，既存の設定も変えない．
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LlmCredentialPut'
+      responses:
+        '200':
+          description: 確かめて保存した．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmCredentialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: キーかモデルを確かめられなかった．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmCredentialError'
+        '502':
+          $ref: '#/components/responses/LlmApiError'
+    delete:
+      operationId: deleteLlmCredential
+      tags: [llm_credential]
+      summary: 自分の LLM API キーを削除し，サービスのキーに戻す
+      description: Bearer トークンのリクエストには `401` を返す．未設定でも `204`．
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 削除した．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------- maps
+  /api/maps:
+    get:
+      operationId: listMaps
+      tags: [maps]
+      summary: マップ一覧（`updated_at` の新しい順，同じなら `id` の大きい順）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      responses:
+        '200':
+          description: マップ一覧．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createMap
+      tags: [maps]
+      summary: マップを作り，生成を始める
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapCreate'
+      responses:
+        '201':
+          description: マップを `generating` で作り，生成ジョブを起動した．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/maps/{id}:
+    get:
+      operationId: getMap
+      tags: [maps]
+      summary: マップ画面の表示内容
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+      responses:
+        '200':
+          description: マップ．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteMap
+      tags: [maps]
+      summary: マップを削除する（生成中でもよい）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        2XX:
+          description: 削除した．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/maps/{id}/deletion_preview:
+    get:
+      operationId: getMapDeletionPreview
+      tags: [maps]
+      summary: 削除前の確認
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+      responses:
+        '200':
+          description: 削除の影響．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapDeletionPreview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/maps/{id}/generation:
+    get:
+      operationId: streamMapGeneration
+      tags: [maps]
+      summary: 生成の様子を受け取る（SSE）
+      description: |
+        `text/event-stream` を返す．各イベントは `event:` 行と `data:` 行（JSON を1行）からなり，空行で区切る．
+        保存済みのノードをすべて送った後，新しく保存されたノードを送り，終端イベントで閉じる．`id:` 行と `Last-Event-ID` は使わない．
+        コメント行（`: keep-alive`）を送ることがある．
+
+        | `event:` | `data:` の形 |
+        | :--- | :--- |
+        | `node` | `#/components/schemas/NodeEvent` |
+        | `done` | `#/components/schemas/DoneEvent`（終端） |
+        | `error` | `#/components/schemas/ErrorEvent`（終端） |
+        | `deleted` | `#/components/schemas/DeletedEvent`（終端） |
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+      responses:
+        '200':
+          description: イベントのストリーム．
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/goal_suggestions:
+    post:
+      operationId: createGoalSuggestions
+      tags: [maps]
+      summary: 入力に対するゴール候補の提案（F-002）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalSuggestionRequest'
+      responses:
+        2XX:
+          description: 判定の結果．ステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalSuggestionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 利用者のキーで LLM を呼んで失敗した．サービスのキーでは呼び直さない．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiKeyError'
+        '502':
+          $ref: '#/components/responses/LlmApiError'
+
+  # ---------------------------------------------------------------- nodes
+  /api/maps/{mapId}/nodes/{nodeId}:
+    get:
+      operationId: getMapNode
+      tags: [nodes]
+      summary: ノードの詳細
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/PathNodeId'
+      responses:
+        '200':
+          description: ノードの詳細．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateMainNodeImportance
+      tags: [editing]
+      summary: 重要度の変更
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/PathNodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportanceUpdate'
+      responses:
+        '200':
+          $ref: '#/components/responses/MapEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+    delete:
+      operationId: removeMainNode
+      tags: [editing]
+      summary: メインノードをマップから外す
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/PathNodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/MapEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/maps/{mapId}/nodes/{nodeId}/progress:
+    patch:
+      operationId: updateNodeProgress
+      tags: [nodes]
+      summary: 進捗の更新（F-010）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/PathNodeId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgressUpdate'
+      responses:
+        '200':
+          description: 更新した．更新後のコンパスを返す．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgressUpdated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/nodes/{id}/sub_nodes:
+    get:
+      operationId: getSubNodes
+      tags: [nodes]
+      summary: ドリルダウン（F-007）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: ノードの内容とサブノード．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubNodeGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: addSubNode
+      tags: [editing]
+      summary: サブノードの追加
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubNodeCreate'
+      responses:
+        2XX:
+          $ref: '#/components/responses/NodeEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/nodes:
+    get:
+      operationId: searchNodes
+      tags: [editing]
+      summary: 既存ノードの提案（F-018）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: タイトルに部分一致させる文字列．
+          schema:
+            type: string
+        - name: map_id
+          in: query
+          required: false
+          description: 指定すると，そのマップでの `already_main` と `inside` を添える．
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: タイトルが一致する自分のノード．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeSuggestions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------- editing
+  /api/maps/{mapId}/nodes:
+    post:
+      operationId: addMainNode
+      tags: [editing]
+      summary: メインノードの追加
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MainNodeCreate'
+      responses:
+        2XX:
+          $ref: '#/components/responses/MapEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/maps/{mapId}/paths:
+    post:
+      operationId: addMapPath
+      tags: [editing]
+      summary: このマップの道の追加
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PathCreate'
+      responses:
+        2XX:
+          $ref: '#/components/responses/MapEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+    delete:
+      operationId: removeMapPath
+      tags: [editing]
+      summary: このマップの道の削除
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/PathMapId'
+        - $ref: '#/components/parameters/FromNodeId'
+        - $ref: '#/components/parameters/ToNodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/MapEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/nodes/{id}:
+    patch:
+      operationId: updateNode
+      tags: [editing]
+      summary: ノードの内容（`title`，`summary`）の編集
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeUpdate'
+      responses:
+        '200':
+          $ref: '#/components/responses/NodeEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/nodes/{id}/sub_nodes/{subNodeId}:
+    delete:
+      operationId: removeSubNode
+      tags: [editing]
+      summary: サブノードを外す
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - name: subNodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/ActingMapId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/NodeEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+  /api/nodes/{id}/sub_node_paths:
+    post:
+      operationId: addSubNodePath
+      tags: [editing]
+      summary: ノードの中のサブノード間の道の追加
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubNodePathCreate'
+      responses:
+        2XX:
+          $ref: '#/components/responses/NodeEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+    delete:
+      operationId: removeSubNodePath
+      tags: [editing]
+      summary: ノードの中のサブノード間の道の削除
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/FromNodeId'
+        - $ref: '#/components/parameters/ToNodeId'
+        - $ref: '#/components/parameters/ActingMapId'
+        - $ref: '#/components/parameters/Confirmed'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/NodeEdited'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditConflict'
+        '422':
+          $ref: '#/components/responses/EditRejected'
+
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: campass_session
+      description: |
+        ブラウザのログイン（design_doc 4.6）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
+        Cookie の名前は design_doc に書かれていない（#43）．ここの `campass_session` は仮の名前である．
+        書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` ヘッダーと，`FRONTEND_ORIGIN` と一致する `Origin` が要る．
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: CLI のトークン（design_doc 4.5.4）．30日のスライド式．期限切れは `401 token_expired`，一致する行がなければ `401 invalid_token`．
+
+  parameters:
+    Provider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [google, github]
+    MapId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    NodeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    PathMapId:
+      name: mapId
+      in: path
+      required: true
+      schema:
+        type: integer
+    PathNodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: integer
+    ActingMapId:
+      name: map_id
+      in: query
+      required: true
+      description: 操作したマップ．
+      schema:
+        type: integer
+    FromNodeId:
+      name: from
+      in: query
+      required: true
+      schema:
+        type: integer
+    ToNodeId:
+      name: to
+      in: query
+      required: true
+      schema:
+        type: integer
+    Confirmed:
+      name: confirmed
+      in: query
+      required: false
+      description: |
+        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（design_doc 4.2.10）．
+        design_doc は「`confirmed=true` を付けて」とだけ書き，クエリか本文かを決めていない（#43）．ここではクエリとして書く．
+      schema:
+        type: boolean
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: Cookie セッションの書き込みでは必須（`GET /api/session` が返す `csrf_token`）．Bearer トークンのリクエストでは要らない．
+      schema:
+        type: string
+
+  headers:
+    Location:
+      description: 転送先．
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: ユーザーを特定できない．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnauthorizedError'
+    Forbidden:
+      description: Cookie セッションの書き込みで，CSRF トークンがない・合わない，または `Origin` が `FRONTEND_ORIGIN` と一致しない．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InvalidCsrfError'
+    NotFound:
+      description: マップやノードがない，または他ユーザーのもの．本文の形は design_doc 4.3.1 に書かれていない（#43）．
+    InvalidUserCode:
+      description: '`user_code` に一致する要求がない，期限切れ，または `pending` でない．'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InvalidUserCodeError'
+    LlmApiError:
+      description: LLM（会社の API）の呼び出しに失敗した．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LlmApiError'
+    MapEdited:
+      description: 編集した．`GET /api/maps/{id}` と同じ形のマップ全体を返す．POST のステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MapView'
+    NodeEdited:
+      description: 編集した．`GET /api/nodes/{id}/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．POST のステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SubNodeGraph'
+    EditConflict:
+      description: 操作したマップが `ready` でない（`map_not_ready`），または実行前の確認が要る（`confirmation_required`）．どちらも何も変えていない．
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/MapNotReadyError'
+              - $ref: '#/components/schemas/ConfirmationRequiredError'
+    EditRejected:
+      description: 循環する（`cycle`），または置こうとしたノードがすでにこのマップのメインノードである（`already_placed`）．何も変えていない．
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/CycleError'
+              - $ref: '#/components/schemas/AlreadyPlacedError'
+
+  schemas:
+    # ------------------------------------------------ 共通
+    Id:
+      type: integer
+    Timestamp:
+      type: string
+      format: date-time
+    Difficulty:
+      type: string
+      enum: [light, standard, deep]
+      description: ライト／スタンダード／ディープ（F-003）．
+    MapStatus:
+      type: string
+      enum: [generating, ready, failed]
+    Progress:
+      type: string
+      enum: [not_started, in_progress, completed]
+    Importance:
+      type: string
+      enum: [high, mid, low]
+      description: 0.9 / 0.5 / 0.1 として保存する．
+    ImportanceScore:
+      type: number
+      minimum: 0
+      maximum: 1
+    GenerationErrorCode:
+      type: string
+      enum: [parse_failed, invalid_map, llm_api_error, user_api_key_invalid, user_api_key_quota_exceeded, internal_error, timed_out]
+      description: '`maps.generation_error_code` と同じ値．意味と `retryable` は design_doc 4.3.1 の表に従う．'
+    NodeRef:
+      type: object
+      required: [node_id, title]
+      properties:
+        node_id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+    MapRef:
+      type: object
+      required: [map_id, title]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+
+    # ------------------------------------------------ エラー
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+          description: バックエンドの「コード→文言」の対応表から作る．利用者に表示してよい．
+    UnauthorizedError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [unauthenticated, token_expired, invalid_token]
+            csrf_token:
+              type: string
+              description: '`GET /api/session` の `unauthenticated` でだけ返す（S-05 のフォーム送信に使う）．'
+    InvalidCsrfError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              const: invalid_csrf
+    InvalidUserCodeError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              const: invalid_user_code
+    CliLoginTokenError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [authorization_pending, slow_down, access_denied, expired_token]
+    LlmApiError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              const: llm_api_error
+    LlmCredentialError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [api_key_invalid, model_not_available]
+    UserApiKeyError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [user_api_key_invalid, user_api_key_quota_exceeded]
+    MapNotReadyError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              const: map_not_ready
+    ConfirmationRequiredError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required: [confirmation]
+          properties:
+            code:
+              const: confirmation_required
+            confirmation:
+              type: object
+              required: [affected_maps, deleted_nodes]
+              properties:
+                affected_maps:
+                  type: array
+                  description: 操作したマップ以外に反映されるマップ．なければ空．
+                  items:
+                    $ref: '#/components/schemas/MapRef'
+                deleted_nodes:
+                  type: array
+                  description: この操作で削除される，進捗のあるノード．なければ空．
+                  items:
+                    type: object
+                    required: [node_id, title, progress]
+                    properties:
+                      node_id:
+                        $ref: '#/components/schemas/Id'
+                      title:
+                        type: string
+                      progress:
+                        $ref: '#/components/schemas/Progress'
+    CycleError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required: [cycle]
+          properties:
+            code:
+              const: cycle
+            cycle:
+              type: array
+              description: 循環するノードの ID の並び（最初と最後が同じ）．
+              items:
+                $ref: '#/components/schemas/Id'
+    AlreadyPlacedError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              const: already_placed
+    MapError:
+      type: object
+      description: '`failed` のマップの理由．'
+      required: [code, message]
+      properties:
+        code:
+          $ref: '#/components/schemas/GenerationErrorCode'
+        message:
+          type: string
+
+    # ------------------------------------------------ auth
+    WebLoginForm:
+      type: object
+      required: [authenticity_token]
+      properties:
+        authenticity_token:
+          type: string
+          description: Rails の CSRF トークン（`GET /api/session` の `csrf_token`）．
+        return_to:
+          type: string
+          description: ログイン後に戻るフロントエンドのパス．`/` で始まり `//` で始まらないパスだけを受け付け，それ以外や指定なしは `/maps`．
+    Session:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user:
+          type: object
+          required: [id, name, email]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            name:
+              type: string
+            email:
+              type: string
+        csrf_token:
+          type: string
+    CliLoginRequestCreate:
+      type: object
+      properties:
+        name:
+          type: [string, 'null']
+          description: CLI のマシン名（`os.Hostname()`）．
+    CliLoginRequestCreated:
+      type: object
+      required: [device_code, user_code, verification_uri, expires_in, interval]
+      properties:
+        device_code:
+          type: string
+        user_code:
+          type: string
+          pattern: '^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$'
+        verification_uri:
+          type: string
+          description: '`FRONTEND_ORIGIN` + `/cli/activate`．`user_code` を含めない．'
+        expires_in:
+          type: integer
+          description: 秒．
+        interval:
+          type: integer
+          description: 秒．
+    CliLoginTokenRequest:
+      type: object
+      required: [device_code]
+      properties:
+        device_code:
+          type: string
+    TokenIssued:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+    UserCodeRequest:
+      type: object
+      required: [user_code]
+      properties:
+        user_code:
+          type: string
+          description: 前後の空白を除き，大文字にそろえ，ハイフンがなくても受け付ける．
+    CliLoginRequestLookup:
+      type: object
+      required: [name, created_at]
+      properties:
+        name:
+          type: [string, 'null']
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+
+    # ------------------------------------------------ llm_credential
+    LlmProviders:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            required: [id, name, models]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              models:
+                type: array
+                items:
+                  type: string
+    LlmCredentialPut:
+      type: object
+      required: [provider, model, api_key]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        api_key:
+          type: string
+          writeOnly: true
+    LlmCredential:
+      type: object
+      required: [provider, model, api_key_last4, verified_at]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        api_key_last4:
+          type: string
+        verified_at:
+          $ref: '#/components/schemas/Timestamp'
+    LlmCredentialResponse:
+      type: object
+      required: [llm_credential]
+      properties:
+        llm_credential:
+          oneOf:
+            - $ref: '#/components/schemas/LlmCredential'
+            - type: 'null'
+
+    # ------------------------------------------------ maps
+    GoalSuggestionRequest:
+      type: object
+      description: リクエストの形は design_doc 4.3.1 に書かれていない（#43）．
+    GoalSuggestionResponse:
+      type: object
+      description: レスポンスの形は design_doc 4.3.1 に書かれていない（#43）．4.2.1 は LLM の出力として `is_concrete` と最大3件の `candidates`（`title`，`description`）を挙げている．
+    MapCreate:
+      type: object
+      required: [title, goal_text, difficulty]
+      properties:
+        title:
+          type: string
+          description: 選んだゴール候補のタイトル，または自由入力の文．
+        goal_text:
+          type: string
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        origin_node_id:
+          type: [integer, 'null']
+          description: 元ノードから作るとき（F-017）．
+        detour_id:
+          type: [integer, 'null']
+          description: 寄り道から作るとき（F-006）．
+    MapCreated:
+      type: object
+      required: [id, title, goal_text, difficulty, status, origin_node_id, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        goal_text:
+          type: string
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        status:
+          $ref: '#/components/schemas/MapStatus'
+        origin_node_id:
+          type: [integer, 'null']
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    MapOrigin:
+      description: 元ノードから作ったマップの元ノード．形は design_doc 4.3.1 に書かれていない（例は `null` だけ，#43）．
+      type: [object, 'null']
+    DetourStart:
+      type: object
+      description: 寄り道から作ったマップの出発点．
+      required: [map_id, map_title, node_id, node_title]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+        map_title:
+          type: string
+        node_id:
+          $ref: '#/components/schemas/Id'
+        node_title:
+          type: string
+    MapListItem:
+      type: object
+      required: [id, title, difficulty, status, origin, detour_start, updated_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        status:
+          $ref: '#/components/schemas/MapStatus'
+        error:
+          $ref: '#/components/schemas/MapError'
+          description: '`failed` のときだけ持つ．'
+        origin:
+          $ref: '#/components/schemas/MapOrigin'
+        detour_start:
+          oneOf:
+            - $ref: '#/components/schemas/DetourStart'
+            - type: 'null'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    MapList:
+      type: object
+      required: [maps]
+      properties:
+        maps:
+          type: array
+          items:
+            $ref: '#/components/schemas/MapListItem'
+    MapNode:
+      type: object
+      description: マップ画面のメインノード．`summary` は含めない．
+      required: [id, title, importance_score, has_sub_nodes, progress, other_map_count, origin_of_map_id, spawned_detour_map, also_inside]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        importance_score:
+          $ref: '#/components/schemas/ImportanceScore'
+        has_sub_nodes:
+          type: boolean
+        progress:
+          $ref: '#/components/schemas/Progress'
+        other_map_count:
+          type: integer
+          minimum: 0
+          description: 1以上ならマップ間ノード．
+        origin_of_map_id:
+          type: [integer, 'null']
+          description: このノードを元ノードとして作ったマップ．
+        spawned_detour_map:
+          description: このノードの寄り道から作ったマップ．
+          oneOf:
+            - $ref: '#/components/schemas/MapRef'
+            - type: 'null'
+        also_inside:
+          type: array
+          description: このマップでこのノードを中に含む別のメインノード（ADR 0006）．
+          items:
+            $ref: '#/components/schemas/NodeRef'
+    MapPath:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          $ref: '#/components/schemas/Id'
+        to:
+          $ref: '#/components/schemas/Id'
+    Compass:
+      type: object
+      required: [current_node_id, candidates, is_goal_reached]
+      properties:
+        current_node_id:
+          type: [integer, 'null']
+          description: 現在地．`null` はスタート地点．
+        candidates:
+          type: array
+          description: '`importance_score` の高い順（同じなら `id` 順）．ゴール到達なら空．'
+          items:
+            type: object
+            required: [node_id, importance_score]
+            properties:
+              node_id:
+                $ref: '#/components/schemas/Id'
+              importance_score:
+                $ref: '#/components/schemas/ImportanceScore'
+        is_goal_reached:
+          type: boolean
+    MapView:
+      type: object
+      required: [map_id, title, status, error, origin, graph, compass]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/MapStatus'
+        error:
+          description: '`failed` のときだけ持ち，それ以外は `null`．'
+          oneOf:
+            - $ref: '#/components/schemas/MapError'
+            - type: 'null'
+        origin:
+          $ref: '#/components/schemas/MapOrigin'
+        graph:
+          type: object
+          required: [nodes, paths]
+          properties:
+            nodes:
+              type: array
+              items:
+                $ref: '#/components/schemas/MapNode'
+            paths:
+              type: array
+              items:
+                $ref: '#/components/schemas/MapPath'
+        compass:
+          description: '`ready` のときだけ持ち，それ以外は `null`．'
+          oneOf:
+            - $ref: '#/components/schemas/Compass'
+            - type: 'null'
+    MapDeletionPreview:
+      type: object
+      description: レスポンスの形は design_doc 4.3.1 に書かれていない（#43）．4.3.1 の表は「そのマップで学習中にしたノードと，他のマップに残るノードの数を返す」とだけ書く．
+
+    # ------------------------------------------------ SSE のイベントの data
+    NodeEvent:
+      type: object
+      description: '`event: node` の `data`．完成した1ノード．ID はすべて DB 保存後の ID．'
+      required: [id, title, summary, is_main, parent_node_id, from, importance_score, reused, progress, detour]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        summary:
+          type: string
+        is_main:
+          type: boolean
+        parent_node_id:
+          type: [integer, 'null']
+          description: サブノードなら，それを持つノードの ID．メインノードなら `null`．
+        from:
+          type: array
+          description: このノードへ道がのびてくるノード．メインノードならこのマップの `map_paths`，サブノードなら同じノードの中の `sub_node_paths`．
+          items:
+            $ref: '#/components/schemas/Id'
+        importance_score:
+          description: メインノードのときだけ．サブノードなら `null`．
+          oneOf:
+            - $ref: '#/components/schemas/ImportanceScore'
+            - type: 'null'
+        reused:
+          type: boolean
+        progress:
+          $ref: '#/components/schemas/Progress'
+        detour:
+          description: メインノードのときだけ．
+          oneOf:
+            - type: object
+              required: [id, title, reason]
+              properties:
+                id:
+                  $ref: '#/components/schemas/Id'
+                title:
+                  type: string
+                reason:
+                  type: string
+            - type: 'null'
+    DoneEvent:
+      type: object
+      description: '`event: done` の `data`（終端）．'
+      required: [map_id, status, node_count]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+        status:
+          const: ready
+        node_count:
+          type: integer
+          description: 送ったノード数．
+    ErrorEvent:
+      type: object
+      description: '`event: error` の `data`（終端）．'
+      required: [code, message, retryable]
+      properties:
+        code:
+          $ref: '#/components/schemas/GenerationErrorCode'
+        message:
+          type: string
+        retryable:
+          type: boolean
+    DeletedEvent:
+      type: object
+      description: '`event: deleted` の `data`（終端．エラーではない）．'
+      required: [map_id]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+
+    # ------------------------------------------------ nodes
+    NodeDetail:
+      type: object
+      required: [id, title, summary, progress, detour, other_maps, origin_of_map_id]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        summary:
+          type: string
+        progress:
+          $ref: '#/components/schemas/Progress'
+        detour:
+          description: このマップでの寄り道．
+          oneOf:
+            - type: object
+              required: [id, title, reason, spawned_map_id]
+              properties:
+                id:
+                  $ref: '#/components/schemas/Id'
+                title:
+                  type: string
+                reason:
+                  type: string
+                spawned_map_id:
+                  type: [integer, 'null']
+                  description: この寄り道から作ったマップ．
+            - type: 'null'
+        other_maps:
+          type: array
+          description: このノードが登場する他のマップ．
+          items:
+            $ref: '#/components/schemas/MapRef'
+        origin_of_map_id:
+          type: [integer, 'null']
+    ProgressUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/Progress'
+    ProgressUpdated:
+      type: object
+      required: [node_id, progress, compass, origin_completion_suggestion]
+      properties:
+        node_id:
+          $ref: '#/components/schemas/Id'
+        progress:
+          $ref: '#/components/schemas/Progress'
+        compass:
+          $ref: '#/components/schemas/Compass'
+        origin_completion_suggestion:
+          description: この更新でゴールに到達し，マップに元ノードがあるときだけ．それ以外は `null`．
+          oneOf:
+            - $ref: '#/components/schemas/NodeRef'
+            - type: 'null'
+    SubNodeGraph:
+      type: object
+      description: ノードの内容とサブノード群，その間の道．形は design_doc 4.3.1 に書かれていない（#43）．
+    NodeSuggestions:
+      type: object
+      required: [nodes]
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [id, title, already_main, inside]
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              title:
+                type: string
+              already_main:
+                type: boolean
+                description: '`true` なら選べない．'
+              inside:
+                type: array
+                description: このマップでこのノードを中に含むメインノード．
+                items:
+                  $ref: '#/components/schemas/NodeRef'
+
+    # ------------------------------------------------ editing
+    MainNodeCreate:
+      type: object
+      description: 既存ノードを置くなら `node_id`，新しく作るなら `title` と `summary`（任意）．
+      properties:
+        node_id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        summary:
+          type: string
+        importance:
+          $ref: '#/components/schemas/Importance'
+          description: 省略時は `mid`．
+      oneOf:
+        - required: [node_id]
+        - required: [title]
+    ImportanceUpdate:
+      type: object
+      required: [importance]
+      properties:
+        importance:
+          $ref: '#/components/schemas/Importance'
+    PathCreate:
+      type: object
+      required: [from_node_id, to_node_id]
+      properties:
+        from_node_id:
+          $ref: '#/components/schemas/Id'
+        to_node_id:
+          $ref: '#/components/schemas/Id'
+    NodeUpdate:
+      type: object
+      required: [map_id]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+          description: 操作したマップ．
+        title:
+          type: string
+        summary:
+          type: string
+    SubNodeCreate:
+      type: object
+      description: 既存ノードを置くなら `node_id`，新しく作るなら `title` と `summary`．
+      required: [map_id]
+      properties:
+        map_id:
+          $ref: '#/components/schemas/Id'
+          description: 操作したマップ．
+        node_id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+        summary:
+          type: string
+      oneOf:
+        - required: [node_id]
+        - required: [title]
+    SubNodePathCreate:
+      type: object
+      required: [from_node_id, to_node_id, map_id]
+      properties:
+        from_node_id:
+          $ref: '#/components/schemas/Id'
+        to_node_id:
+          $ref: '#/components/schemas/Id'
+        map_id:
+          $ref: '#/components/schemas/Id'
+          description: 操作したマップ．

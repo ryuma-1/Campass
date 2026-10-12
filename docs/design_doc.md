@@ -571,213 +571,104 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.5.7）から編�
 
 #### 4.3.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
+API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラーの `code` の取り得る値，SSE のイベントの `data`）の正は `api/openapi.yaml`（OpenAPI 3.1）とし，本節は各 API の目的，振る舞いと理由，エラーコードの意味と文言の対応を書く．JSON の例は書かず，`api/openapi.yaml` の `operationId` と `components/schemas` の名前で参照する．例を書かないのは，手で書いた例がスキーマとずれ得る余計な状態になるためである．API の形を変えるときは，`api/openapi.yaml` と本節を同じ変更で直す．形がまだ決まっていない箇所（`POST /api/goal_suggestions`，`GET /api/maps/:id/deletion_preview`，`GET /api/nodes/:id/sub_nodes` の形など）は #43 で決める．
+
 REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4.5）は同じ API を利用する．ブラウザは Cookie セッション（4.6），CLI は `Authorization: Bearer <token>` ヘッダー（4.5.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API（`POST /api/auth/:provider`，`GET /api/auth/:provider/callback`，`POST /api/auth/cli_login_requests`，`POST /api/auth/cli_login_requests/token`）を除いて `401` を返す．
 
-| エンドポイント | 概要 |
-| :--- | :--- |
-| `POST /api/auth/:provider` | Web のログインを始める（F-019，4.6）．`provider` は `google` / `github`．SPA の CSRF トークン付きのフォーム送信で呼び，Google / GitHub のログイン画面へ転送する．`return_to` を受け取る． |
-| `GET /api/auth/:provider/callback` | Google / GitHub からの戻り先（4.6）．ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する． |
-| `GET /api/session` | ログイン中のユーザーと CSRF トークンを返す（4.6）．未ログインなら `401`． |
-| `DELETE /api/session` | ログアウト．その端末のセッションだけを消す（4.6）． |
-| `POST /api/auth/cli_login_requests` | CLI のログインを始める（4.5.4）．認証なし．CLI のマシン名 `name` を受け取り，`device_code`，`user_code`，`verification_uri`，`expires_in`，`interval` を返す． |
-| `POST /api/auth/cli_login_requests/token` | CLI がトークンを受け取りに来る（4.5.4）．認証なし．`device_code` を受け取り，許可されていればトークンを発行して返す．まだなら状態を返す． |
-| `POST /api/auth/cli_login_requests/lookup` | S-04 の確認に出す内容（端末名と開始時刻）を返す（4.4）．Web のログインが必要．`user_code` を受け取る． |
-| `POST /api/auth/cli_login_requests/approve` | CLI のログインを許可する（S-04）．Web のログインが必要．`user_code` を受け取る． |
-| `POST /api/auth/cli_login_requests/deny` | CLI のログインを拒否する（S-04）．Web のログインが必要．`user_code` を受け取る． |
-| `DELETE /api/auth/tokens/current` | リクエストに使ったトークンを失効させる（4.5.4）． |
-| `GET /api/llm_providers` | 自分の LLM API キーに選べる会社とモデルの候補（ReqDef F-020）． |
-| `GET /api/llm_credential` | 自分の LLM API キーの設定の状態（F-020）．会社，モデル，`api_key_last4`，`verified_at` を返し，未設定なら `null`．キーそのものは返さない． |
-| `PUT /api/llm_credential` | 自分の LLM API キーを確かめてから保存する（F-020，4.3.2）．`provider`，`model`，`api_key` を受け取る．Web のログイン（Cookie セッション）でだけ受け付ける． |
-| `DELETE /api/llm_credential` | 自分の LLM API キーを削除し，サービスのキーに戻す（F-020）．Web のログイン（Cookie セッション）でだけ受け付ける． |
-| `GET /api/maps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． |
-| `POST /api/maps` | マップを作り，同時に生成を開始する（F-011）．ゴールと難易度を受け取り，元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）．マップは `generating` で作られ，生成ジョブ（4.2.9）を起動して `201` を返す．生成の様子は `GET /api/maps/:id/generation` で受け取る． |
-| `DELETE /api/maps/:id` | マップの削除．ノードの扱いは 4.1.2 に従う．生成中のマップも削除でき，生成ジョブは止まる（4.2.9）． |
-| `GET /api/maps/:id/deletion_preview` | 削除前の確認．そのマップで学習中にしたノードと，他のマップに残るノードの数を返す（4.1.2）． |
-| `POST /api/goal_suggestions` | 入力に対するゴール候補提案（F-002）．マップを作る前に呼ぶため，マップを指定しない． |
-| `GET /api/maps/:id/generation` (SSE) | 生成の様子を受け取る（F-011）．保存済みのノードをすべて送った後，新しく保存されたノードを送り，終端イベントで閉じる．何度つなぎ直してもよい．イベント形式は本節の「SSE イベント形式」を参照． |
-| `GET /api/maps/:id` | マップ画面の表示内容．生成の状態，メインノードと道，作成済みの寄り道の入口，元ノードから作ったマップへのリンク，コンパス情報（4.2.8）を返す．コンパス情報は `ready` のときだけ返す． |
-| `GET /api/maps/:mapId/nodes/:nodeId` | ノードの詳細．概要，進捗，このマップでの寄り道，そのノードが登場する他のマップ，元ノードとして作ったマップを返す． |
-| `GET /api/nodes/:id/sub_nodes` | ドリルダウン（F-007）．指定ノードのサブノード群とその間の道をグラフとして取得する．サブノードはマップ間で共有されるため，マップを指定しない． |
-| `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | ノードの進捗ステータス更新（F-010）．どのマップから操作したかを `mapId` で受け取り，そのマップの進捗の履歴（`map_progress_events`）への記録と `started_map_id` の更新を行う（4.2.8）．レスポンスに更新後のコンパス情報を含める． |
-| `GET /api/nodes?q=:text&map_id=:mapId` | 既存ノードの提案（F-018）．タイトルに部分一致する自分のノードを返す．`map_id` を指定すると，そのマップで既にメインノードか，どのメインノードの中にあるかを添える（4.2.10）． |
-| `POST /api/maps/:mapId/nodes` | メインノードの追加（F-018）．既存ノードを置く場合は `node_id`，新しく作る場合は `title` と `summary`（任意）を受け取る．`importance`（`high` / `mid` / `low`）は任意で，省略時は `mid`． |
-| `PATCH /api/maps/:mapId/nodes/:nodeId` | 重要度の変更（F-018）．`importance`（`high` / `mid` / `low`）を受け取る． |
-| `DELETE /api/maps/:mapId/nodes/:nodeId` | メインノードをマップから外す（F-018）．後始末は 4.2.10 に従う． |
-| `POST /api/maps/:mapId/paths` / `DELETE /api/maps/:mapId/paths?from=:fromId&to=:toId` | このマップの道の追加・削除（F-018）．追加は `from_node_id` と `to_node_id` を受け取る． |
-| `PATCH /api/nodes/:id` | ノードの内容（`title`，`summary`）の編集（F-018）．操作したマップを `map_id` で受け取る． |
-| `POST /api/nodes/:id/sub_nodes` / `DELETE /api/nodes/:id/sub_nodes/:subNodeId?map_id=:mapId` | サブノードの追加・外す（F-018）．追加は `node_id`（既存ノード）または `title` と `summary`（新規），および `map_id` を受け取る． |
-| `POST /api/nodes/:id/sub_node_paths` / `DELETE /api/nodes/:id/sub_node_paths?from=:fromId&to=:toId&map_id=:mapId` | ノードの中のサブノード間の道の追加・削除（F-018）．追加は `from_node_id`，`to_node_id`，`map_id` を受け取る． |
+| エンドポイント | `operationId` | 概要 |
+| :--- | :--- | :--- |
+| `POST /api/auth/:provider` | `startWebLogin` | Web のログインを始める（F-019，4.6）．`provider` は `google` / `github`．SPA の CSRF トークン付きのフォーム送信で呼び，Google / GitHub のログイン画面へ転送する．`return_to` を受け取る． |
+| `GET /api/auth/:provider/callback` | `webLoginCallback` | Google / GitHub からの戻り先（4.6）．ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する． |
+| `GET /api/session` | `getSession` | ログイン中のユーザーと CSRF トークンを返す（4.6）．未ログインなら `401`． |
+| `DELETE /api/session` | `deleteSession` | ログアウト．その端末のセッションだけを消す（4.6）． |
+| `POST /api/auth/cli_login_requests` | `createCliLoginRequest` | CLI のログインを始める（4.5.4）．認証なし．CLI のマシン名 `name` を受け取り，`device_code`，`user_code`，`verification_uri`，`expires_in`，`interval` を返す． |
+| `POST /api/auth/cli_login_requests/token` | `pollCliLoginToken` | CLI がトークンを受け取りに来る（4.5.4）．認証なし．`device_code` を受け取り，許可されていればトークンを発行して返す．まだなら状態を返す． |
+| `POST /api/auth/cli_login_requests/lookup` | `lookupCliLoginRequest` | S-04 の確認に出す内容（端末名と開始時刻）を返す（4.4）．Web のログインが必要．`user_code` を受け取る． |
+| `POST /api/auth/cli_login_requests/approve` | `approveCliLoginRequest` | CLI のログインを許可する（S-04）．Web のログインが必要．`user_code` を受け取る． |
+| `POST /api/auth/cli_login_requests/deny` | `denyCliLoginRequest` | CLI のログインを拒否する（S-04）．Web のログインが必要．`user_code` を受け取る． |
+| `DELETE /api/auth/tokens/current` | `revokeCurrentToken` | リクエストに使ったトークンを失効させる（4.5.4）． |
+| `GET /api/llm_providers` | `listLlmProviders` | 自分の LLM API キーに選べる会社とモデルの候補（ReqDef F-020）． |
+| `GET /api/llm_credential` | `getLlmCredential` | 自分の LLM API キーの設定の状態（F-020）．会社，モデル，`api_key_last4`，`verified_at` を返し，未設定なら `null`．キーそのものは返さない． |
+| `PUT /api/llm_credential` | `putLlmCredential` | 自分の LLM API キーを確かめてから保存する（F-020，4.3.2）．`provider`，`model`，`api_key` を受け取る．Web のログイン（Cookie セッション）でだけ受け付ける． |
+| `DELETE /api/llm_credential` | `deleteLlmCredential` | 自分の LLM API キーを削除し，サービスのキーに戻す（F-020）．Web のログイン（Cookie セッション）でだけ受け付ける． |
+| `GET /api/maps` | `listMaps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． |
+| `POST /api/maps` | `createMap` | マップを作り，同時に生成を開始する（F-011）．ゴールと難易度を受け取り，元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）．マップは `generating` で作られ，生成ジョブ（4.2.9）を起動して `201` を返す．生成の様子は `GET /api/maps/:id/generation` で受け取る． |
+| `DELETE /api/maps/:id` | `deleteMap` | マップの削除．ノードの扱いは 4.1.2 に従う．生成中のマップも削除でき，生成ジョブは止まる（4.2.9）． |
+| `GET /api/maps/:id/deletion_preview` | `getMapDeletionPreview` | 削除前の確認．そのマップで学習中にしたノードと，他のマップに残るノードの数を返す（4.1.2）． |
+| `POST /api/goal_suggestions` | `createGoalSuggestions` | 入力に対するゴール候補提案（F-002）．マップを作る前に呼ぶため，マップを指定しない． |
+| `GET /api/maps/:id/generation` (SSE) | `streamMapGeneration` | 生成の様子を受け取る（F-011）．保存済みのノードをすべて送った後，新しく保存されたノードを送り，終端イベントで閉じる．何度つなぎ直してもよい．イベント形式は本節の「SSE イベント形式」を参照． |
+| `GET /api/maps/:id` | `getMap` | マップ画面の表示内容．生成の状態，メインノードと道，作成済みの寄り道の入口，元ノードから作ったマップへのリンク，コンパス情報（4.2.8）を返す．コンパス情報は `ready` のときだけ返す． |
+| `GET /api/maps/:mapId/nodes/:nodeId` | `getMapNode` | ノードの詳細．概要，進捗，このマップでの寄り道，そのノードが登場する他のマップ，元ノードとして作ったマップを返す． |
+| `GET /api/nodes/:id/sub_nodes` | `getSubNodes` | ドリルダウン（F-007）．指定ノードのサブノード群とその間の道をグラフとして取得する．サブノードはマップ間で共有されるため，マップを指定しない． |
+| `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | `updateNodeProgress` | ノードの進捗ステータス更新（F-010）．どのマップから操作したかを `mapId` で受け取り，そのマップの進捗の履歴（`map_progress_events`）への記録と `started_map_id` の更新を行う（4.2.8）．レスポンスに更新後のコンパス情報を含める． |
+| `GET /api/nodes?q=:text&map_id=:mapId` | `searchNodes` | 既存ノードの提案（F-018）．タイトルに部分一致する自分のノードを返す．`map_id` を指定すると，そのマップで既にメインノードか，どのメインノードの中にあるかを添える（4.2.10）． |
+| `POST /api/maps/:mapId/nodes` | `addMainNode` | メインノードの追加（F-018）．既存ノードを置く場合は `node_id`，新しく作る場合は `title` と `summary`（任意）を受け取る．`importance`（`high` / `mid` / `low`）は任意で，省略時は `mid`． |
+| `PATCH /api/maps/:mapId/nodes/:nodeId` | `updateMainNodeImportance` | 重要度の変更（F-018）．`importance`（`high` / `mid` / `low`）を受け取る． |
+| `DELETE /api/maps/:mapId/nodes/:nodeId` | `removeMainNode` | メインノードをマップから外す（F-018）．後始末は 4.2.10 に従う． |
+| `POST /api/maps/:mapId/paths` / `DELETE /api/maps/:mapId/paths?from=:fromId&to=:toId` | `addMapPath` / `removeMapPath` | このマップの道の追加・削除（F-018）．追加は `from_node_id` と `to_node_id` を受け取る． |
+| `PATCH /api/nodes/:id` | `updateNode` | ノードの内容（`title`，`summary`）の編集（F-018）．操作したマップを `map_id` で受け取る． |
+| `POST /api/nodes/:id/sub_nodes` / `DELETE /api/nodes/:id/sub_nodes/:subNodeId?map_id=:mapId` | `addSubNode` / `removeSubNode` | サブノードの追加・外す（F-018）．追加は `node_id`（既存ノード）または `title` と `summary`（新規），および `map_id` を受け取る． |
+| `POST /api/nodes/:id/sub_node_paths` / `DELETE /api/nodes/:id/sub_node_paths?from=:fromId&to=:toId&map_id=:mapId` | `addSubNodePath` / `removeSubNodePath` | ノードの中のサブノード間の道の追加・削除（F-018）．追加は `from_node_id`，`to_node_id`，`map_id` を受け取る． |
 
-**`POST /api/maps` リクエスト／レスポンス例**
-
-```json
-{ "title": "AIエンジニアリング入門", "goal_text": "AIについて深く知りたい", "difficulty": "standard", "origin_node_id": null, "detour_id": null }
-```
-
-```json
-{
-  "id": 123,
-  "title": "AIエンジニアリング入門",
-  "goal_text": "AIについて深く知りたい",
-  "difficulty": "standard",
-  "status": "generating",
-  "origin_node_id": null,
-  "created_at": "2026-07-03T10:00:00+09:00"
-}
-```
+**`POST /api/maps`**（`createMap`．形は `MapCreate` / `MapCreated`）
 
 * `title` は，ゴール候補（F-002）を選んだ場合はその候補のタイトル，自由入力のまま進んだ場合は入力した文とする．
 * マップの作成と生成の開始を1回のリクエストにまとめるため，生成前の状態は持たない（`status` は作成時から `generating`）．生成をやり直す API はない（4.2.9）．
 
-**`GET /api/session` レスポンス例**
+**`GET /api/session`**（`getSession`．形は `Session` / `UnauthorizedError`）
 
-```json
-{
-  "user": { "id": 1, "name": "池田 琉俊", "email": "user@example.com" },
-  "csrf_token": "k9Xn..."
-}
-```
-
-未ログインの場合（`401`）:
-
-```json
-{ "code": "unauthenticated", "message": "ログインしてください．", "csrf_token": "k9Xn..." }
-```
-
+* ログイン中ならユーザー（`id`，`name`，`email`）と `csrf_token` を返す．未ログインなら `401`（`code`: `unauthenticated`，文言「ログインしてください．」）とし，`csrf_token` も返す．
 * `message` は他のエラーと同じく「コード→文言」の対応表から作る（`unauthenticated`，`invalid_csrf`）．S-05 に示すログインの失敗の理由（`email_not_verified`，`auth_failed`，4.6）も同じ対応表に置く．
 * `csrf_token` は Rails 標準の CSRF トークンである．SPA は書き込み系（POST / PATCH / DELETE）のリクエストに `X-CSRF-Token` ヘッダーとして付ける（4.6）．未ログインでも返すのは，S-05 のログインのフォーム送信（`POST /api/auth/:provider`）に必要なためである．
 * CSRF トークンがない・合わない，または `Origin` が `FRONTEND_ORIGIN` と一致しない書き込みには `403`（`code`: `invalid_csrf`）を返す（4.6）．
 
-**Bearer トークンが使えない場合の `401` レスポンス例**
+**Bearer トークンが使えない場合の `401`**（形は `UnauthorizedError`）
 
-ログイン用の API を除くすべてのエンドポイントで共通である．
+ログイン用の API を除くすべてのエンドポイントで共通である．`Authorization: Bearer <token>` を付けたリクエストで次に当たるときに返す．
 
-`Authorization: Bearer <token>` を付けたリクエストで，トークンの `expires_at` を過ぎている場合:
-
-```json
-{ "code": "token_expired", "message": "ログインの有効期限が切れました．campass login を実行してください．" }
-```
-
-トークンに一致する `api_tokens` の行がない（誤ったトークン，または `campass logout` で失効させた）場合:
-
-```json
-{ "code": "invalid_token", "message": "ログインしていないか，ログアウトされています．campass login を実行してください．" }
-```
+| `code` | 返す条件 | 文言 |
+| :--- | :--- | :--- |
+| `token_expired` | トークンの `expires_at` を過ぎている | ログインの有効期限が切れました．campass login を実行してください． |
+| `invalid_token` | トークンに一致する `api_tokens` の行がない（誤ったトークン，または `campass logout` で失効させた） | ログインしていないか，ログアウトされています．campass login を実行してください． |
 
 * `message` は他のエラーと同じく「コード→文言」の対応表から作る．CLI はこの `message` をそのまま表示する（4.5.4）．
 * `Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定するため（4.6），Cookie セッションがあってもこの `401` になる．
 
-**`POST /api/auth/cli_login_requests` リクエスト／レスポンス例**
-
-```json
-{ "name": "my-laptop" }
-```
-
-```json
-{
-  "device_code": "Gm2x...",
-  "user_code": "WDJB-MJHT",
-  "verification_uri": "https://app.campass.example.com/cli/activate",
-  "expires_in": 600,
-  "interval": 5
-}
-```
+**`POST /api/auth/cli_login_requests`**（`createCliLoginRequest`．形は `CliLoginRequestCreate` / `CliLoginRequestCreated`）
 
 * `device_code` は CLI だけが知るランダムな長い値で，DB には SHA-256 ハッシュだけを保存する（4.1.2）．
 * `verification_uri` は `FRONTEND_ORIGIN` + `/cli/activate` とする．`user_code` は URL に含めない（4.5.4）．
 
-**`POST /api/auth/cli_login_requests/token` リクエスト／レスポンス例**
+**`POST /api/auth/cli_login_requests/token`**（`pollCliLoginToken`．形は `CliLoginTokenRequest` / `TokenIssued` / `CliLoginTokenError`）
 
-```json
-{ "device_code": "Gm2x..." }
-```
+許可された場合は `200` で `token` と `expires_at` を返す（形は CLI のトークンの発行として共通である）．まだトークンを渡せない場合は `400` で，`code` に RFC 8628 と同じ状態を返す．
 
-許可された場合（`200`）．形は CLI のトークンの発行として共通である:
-
-```json
-{ "token": "cmp_3f9a...", "expires_at": "2027-01-04T10:00:00+09:00" }
-```
-
-まだトークンを渡せない場合は `400` で，`code` に RFC 8628 と同じ状態を返す:
-
-```json
-{ "code": "authorization_pending", "message": "ブラウザでの許可を待っています．" }
-```
-
-```json
-{ "code": "slow_down", "message": "受け取りの間隔が短すぎます．" }
-```
-
-```json
-{ "code": "access_denied", "message": "ログインが拒否されました．" }
-```
-
-```json
-{ "code": "expired_token", "message": "期限切れです．もう一度 campass login を実行してください．" }
-```
-
-| `code` | 返す条件 |
-| :--- | :--- |
-| `authorization_pending` | `pending` で期限内．まだ許可も拒否もされていない |
-| `slow_down` | 前回の受け取り（`last_polled_at`）から `interval` 秒たっていない．`slow_down` を返したときも `last_polled_at` を更新する |
-| `access_denied` | `denied` |
-| `expired_token` | 期限切れ，すでに `consumed`，または `device_code` に一致する要求がない |
+| `code` | 返す条件 | 文言 |
+| :--- | :--- | :--- |
+| `authorization_pending` | `pending` で期限内．まだ許可も拒否もされていない | ブラウザでの許可を待っています． |
+| `slow_down` | 前回の受け取り（`last_polled_at`）から `interval` 秒たっていない．`slow_down` を返したときも `last_polled_at` を更新する | 受け取りの間隔が短すぎます． |
+| `access_denied` | `denied` | ログインが拒否されました． |
+| `expired_token` | 期限切れ，すでに `consumed`，または `device_code` に一致する要求がない | 期限切れです．もう一度 campass login を実行してください． |
 
 * トークンは，許可されたときではなく，CLI がこの API で受け取りに来たときに作る．`approved` の要求の行をロックし，`api_tokens` に1行足して要求を `consumed` にするまでを1つのトランザクションで行う．トークンの平文はこのレスポンスでだけ返し，2回目以降は `expired_token` になる．
 * `message` は他のエラーと同じく「コード→文言」の対応表から作る．CLI は `access_denied` と `expired_token` ではこの `message` をそのまま表示する（4.5.4）．
 
-**`POST /api/auth/cli_login_requests/lookup` / `approve` / `deny` リクエスト／レスポンス例**
+**`POST /api/auth/cli_login_requests/lookup` / `approve` / `deny`**（`lookupCliLoginRequest` / `approveCliLoginRequest` / `denyCliLoginRequest`．形は `UserCodeRequest` / `CliLoginRequestLookup` / `InvalidUserCodeError`）
 
-```json
-{ "user_code": "WDJB-MJHT" }
-```
-
-`lookup` のレスポンス（`200`）:
-
-```json
-{ "name": "my-laptop", "created_at": "2026-10-11T10:00:00+09:00" }
-```
-
+* `lookup` は要求の `name`（端末名）と `created_at`（開始時刻）を返す．
 * `approve` は要求に `user_id` を入れて `approved` に，`deny` は `denied` にし，どちらも `204` を返す．
 * 3つとも，`user_code` に一致する要求がない，期限切れ，`pending` でない場合は `404`（`code`: `invalid_user_code`）を返す．
 * `user_code` は前後の空白を除き，大文字にそろえ，ハイフンがなくても受け付ける．
 * 3つとも Web のログイン（Cookie セッション，4.6）でだけ受け付け，Bearer トークンのリクエストには `401` を返す．書き込みと同じく CSRF トークンと `Origin` を確かめる．`user_code` を URL に残さないため，`lookup` も POST とする．
 
-**`GET /api/llm_providers` レスポンス例**
-
-```json
-{
-  "providers": [
-    { "id": "gemini", "name": "Gemini", "models": [ "gemini-3.1-flash-lite" ] }
-  ]
-}
-```
+**`GET /api/llm_providers`**（`listLlmProviders`．形は `LlmProviders`）
 
 * 返すのは実装済みの会社（LLM の抽象インタフェースの実装がある会社．4.3.2）だけとする．今は Gemini だけである．
 * モデルの候補は，バックエンドの設定ファイル（例：`backend/config/llm_providers.yml`．名前は実装に任せる）で会社ごとに決める．自由なモデル名を受け付けないのは，プロンプトや JSON Schema（4.2.4）が合わないモデルで生成が失敗するのを防ぐためである．
 
-**`GET /api/llm_credential` / `PUT /api/llm_credential` リクエスト／レスポンス例**
+**`GET` / `PUT` / `DELETE /api/llm_credential`**（`getLlmCredential` / `putLlmCredential` / `deleteLlmCredential`．形は `LlmCredentialPut` / `LlmCredentialResponse` / `LlmCredentialError`）
 
-`PUT` のリクエスト:
-
-```json
-{ "provider": "gemini", "model": "gemini-3.1-flash-lite", "api_key": "AIza..." }
-```
-
-レスポンス（`GET` と `PUT` で共通．`200`）:
-
-```json
-{
-  "llm_credential": { "provider": "gemini", "model": "gemini-3.1-flash-lite", "api_key_last4": "x7Qc", "verified_at": "2026-10-12T10:00:00+09:00" }
-}
-```
-
-未設定の場合（`GET`）:
-
-```json
-{ "llm_credential": null }
-```
-
+* `GET` と `PUT` は同じ形（`LlmCredentialResponse`）を返す．未設定なら `llm_credential` が `null`．
 * キーそのものは，どの応答（`PUT` の成功とエラーの応答を含む）にも含めない．変えるときは，会社・モデル・キーをすべて入力し直して `PUT` する．
 * `PUT` は保存の前に，選んだ会社の実装で「キーとモデルを確かめる」（4.3.2）．確かめられたら `verified_at` を現在時刻にして保存する（設定済みなら置き換える）．確かめられなければ保存せず，既存の設定も変えずに次のエラーを返す．`message` は他のエラーと同じく「コード→文言」の対応表から作る．
 
@@ -792,58 +683,18 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 * 保存のときの `api_key_invalid` は「いま入力したキー」を確かめた結果で，呼び出しのときの `user_api_key_invalid`（下の「SSE イベント形式」）は「保存してあるキー」が使えなかった結果である．利用者に求めることが違う（入力を直す／S-06 で設定を見直す）ため，コードを分ける．
 * `DELETE /api/llm_credential` は行を消して `204` を返す（未設定でも `204`）．以後の呼び出しはサービスのキーに戻る．生成中のマップは，始まったときのキーで続く（4.2.9）．
 
-**`POST /api/goal_suggestions` のエラー**
+**`POST /api/goal_suggestions` のエラー**（`createGoalSuggestions`．形は `UserApiKeyError` / `LlmApiError`）
 
 * 利用者のキー（4.3.2）で LLM を呼んで失敗したときは，`422` で `code` に `user_api_key_invalid` / `user_api_key_quota_exceeded` を返す．意味と文言は，本節の「SSE イベント形式」のエラーコードの表と同じ「コード→文言」の対応表から作る．サービスのキーでは呼び直さない．クライアントは S-06 で設定を確かめるよう案内する（4.4）．
 * それ以外の LLM の呼び出しの失敗は `502` で `code` に `llm_api_error` を返す．
 
-**`GET /api/maps` レスポンス例**
-
-```json
-{
-  "maps": [
-    { "id": 123, "title": "AIエンジニアリング入門", "difficulty": "standard", "status": "ready", "origin": null, "detour_start": null, "updated_at": "2026-07-03T10:05:00+09:00" },
-    { "id": 140, "title": "ベイズ統計", "difficulty": "light", "status": "ready", "origin": null, "detour_start": { "map_id": 123, "map_title": "AIエンジニアリング入門", "node_id": 501, "node_title": "統計学の基礎" }, "updated_at": "2026-07-05T21:30:00+09:00" },
-    { "id": 141, "title": "Rust 入門", "difficulty": "light", "status": "failed", "error": { "code": "llm_api_error", "message": "生成サービスに接続できませんでした．" }, "origin": null, "detour_start": null, "updated_at": "2026-07-06T09:12:00+09:00" }
-  ]
-}
-```
+**`GET /api/maps`**（`listMaps`．形は `MapList`）
 
 * `updated_at` の新しい順に返す（同じなら `id` の大きい順）．`updated_at` の意味は 4.1.2 の `maps` に従う．
 * `status` が `failed` のマップは `error`（`code`，`message`）を持つ．`message` はエラーコードの対応表（本節の「SSE イベント形式」）から作る．
 * このAPIを呼んだときに，ハートビートが切れた `generating` のマップを `failed`（`timed_out`）にしてから返す（4.2.9）．
 
-**`GET /api/maps/:id` レスポンス例**
-
-```json
-{
-  "map_id": 123,
-  "title": "AIエンジニアリング入門",
-  "status": "ready",
-  "error": null,
-  "origin": null,
-  "graph": {
-    "nodes": [
-      { "id": 501, "title": "統計学の基礎", "importance_score": 0.8, "has_sub_nodes": true, "progress": "completed", "other_map_count": 1, "origin_of_map_id": null, "spawned_detour_map": { "map_id": 140, "title": "ベイズ統計" }, "also_inside": [] },
-      { "id": 502, "title": "線形代数の基礎", "importance_score": 0.9, "has_sub_nodes": false, "progress": "not_started", "other_map_count": 0, "origin_of_map_id": null, "spawned_detour_map": null, "also_inside": [] },
-      { "id": 503, "title": "微分の基礎", "importance_score": 0.6, "has_sub_nodes": false, "progress": "not_started", "other_map_count": 0, "origin_of_map_id": 150, "spawned_detour_map": null, "also_inside": [] },
-      { "id": 504, "title": "確率の基礎", "importance_score": 0.5, "has_sub_nodes": false, "progress": "completed", "other_map_count": 0, "origin_of_map_id": null, "spawned_detour_map": null, "also_inside": [ { "node_id": 501, "title": "統計学の基礎" } ] }
-    ],
-    "paths": [
-      { "from": 501, "to": 502 },
-      { "from": 501, "to": 503 }
-    ]
-  },
-  "compass": {
-    "current_node_id": 501,
-    "candidates": [
-      { "node_id": 502, "importance_score": 0.9 },
-      { "node_id": 503, "importance_score": 0.6 }
-    ],
-    "is_goal_reached": false
-  }
-}
-```
+**`GET /api/maps/:id`**（`getMap`．形は `MapView`）
 
 * `status` は `generating` / `ready` / `failed` のいずれか．`compass` は `ready` のときだけ返し，それ以外は `null` とする．`error` は `failed` のときだけ `code` と `message` を持ち，それ以外は `null` とする．ハートビートの判定は `GET /api/maps` と同じく行う（4.2.9）．
 * `generating` のマップでは，`graph` はその時点までに保存されたメインノードと道である．
@@ -853,38 +704,15 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 * `also_inside` は，このマップでそのノードを中に含む（深さを問わずサブノードに持つ）別のメインノード．空でなければ「『A』の中にもあります」の印を付ける（ADR 0006）．
 * `compass.current_node_id` は，進捗の履歴から導出した現在地である（4.2.8）．メインノードが0個のマップでは `graph.nodes` が空で，`is_goal_reached` は `false` になる．
 
-**`GET /api/maps/:mapId/nodes/:nodeId` レスポンス例**
+**`GET /api/maps/:mapId/nodes/:nodeId`**（`getMapNode`．形は `NodeDetail`）
 
-```json
-{
-  "id": 501,
-  "title": "統計学の基礎",
-  "summary": "データの要約と確率の基本を学ぶ",
-  "progress": "completed",
-  "detour": { "id": 77, "title": "ベイズ統計", "reason": "確率の更新という考え方に触れる", "spawned_map_id": 140 },
-  "other_maps": [ { "map_id": 124, "title": "データ分析基礎" } ],
-  "origin_of_map_id": null
-}
-```
+* 概要，進捗，このマップでの寄り道（作ったマップがあれば `spawned_map_id`），そのノードが登場する他のマップ，元ノードとして作ったマップを返す．
 
-**`PATCH /api/maps/:mapId/nodes/:nodeId/progress` リクエスト／レスポンス例**
-
-```json
-{ "status": "completed" }
-```
-
-```json
-{
-  "node_id": 503,
-  "progress": "completed",
-  "compass": { "current_node_id": 503, "candidates": [], "is_goal_reached": true },
-  "origin_completion_suggestion": { "node_id": 900, "title": "微積分" }
-}
-```
+**`PATCH /api/maps/:mapId/nodes/:nodeId/progress`**（`updateNodeProgress`．形は `ProgressUpdate` / `ProgressUpdated`）
 
 * `origin_completion_suggestion` は，この更新でマップがゴールに到達し，マップに元ノードがある場合にだけ返す（それ以外は `null`）．クライアントは元ノードの完了を提案し，完了にするかはユーザーが決める（4.2.8）．
 
-**ノードの編集（F-018）のレスポンス**
+**ノードの編集（F-018）のレスポンス**（形は `MapView` / `SubNodeGraph` / `MapNotReadyError` / `ConfirmationRequiredError` / `CycleError` / `AlreadyPlacedError`）
 
 * マップに関わる操作（`/api/maps/:mapId/nodes`，`/api/maps/:mapId/paths`）は，成功すると `GET /api/maps/:id` と同じ形のマップ全体（`graph` と `compass`）を返す．道やメインノードが変わるとコンパス候補も変わるためである．
 * ノードに関わる操作（`/api/nodes/:id`，`/api/nodes/:id/sub_nodes`，`/api/nodes/:id/sub_node_paths`）は，成功すると `GET /api/nodes/:id/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．
@@ -898,42 +726,17 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
   | `422` | `already_placed` | 置こうとしたノードが，すでにこのマップのメインノードである |
   | `404` | — | マップやノードがない，または他ユーザーのもの |
 
-**`GET /api/nodes?q=確率&map_id=123` レスポンス例**
-
-```json
-{
-  "nodes": [
-    { "id": 504, "title": "確率の基礎", "already_main": true, "inside": [ { "node_id": 501, "title": "統計学の基礎" } ] },
-    { "id": 611, "title": "条件付き確率", "already_main": false, "inside": [ { "node_id": 501, "title": "統計学の基礎" } ] },
-    { "id": 812, "title": "確率過程", "already_main": false, "inside": [] }
-  ]
-}
-```
+**`GET /api/nodes?q=:text&map_id=:mapId`**（`searchNodes`．形は `NodeSuggestions`）
 
 * `already_main` が `true` のノードは選べない状態で示す．`inside` は，このマップでそのノードを中に含むメインノードである．
 
-**`POST /api/maps/:mapId/paths` の循環エラー例**
+**循環と確認のエラー**
 
-```json
-{ "code": "cycle", "message": "この道を引くと循環します：線形代数の基礎 → 行列の積 → 線形代数の基礎", "cycle": [502, 610, 502] }
-```
-
-**`DELETE /api/maps/:mapId/nodes/:nodeId` の確認例**
-
-```json
-{
-  "code": "confirmation_required",
-  "message": "この操作は次の内容に影響します．",
-  "confirmation": {
-    "affected_maps": [ { "map_id": 150, "title": "微積分" } ],
-    "deleted_nodes": [ { "node_id": 503, "title": "微分の基礎", "progress": "in_progress" } ]
-  }
-}
-```
-
+* `cycle` は，循環するノードの ID の並び（最初と最後が同じ）を `cycle` に入れ，`message` にもタイトルの並びを入れる（例：「この道を引くと循環します：線形代数の基礎 → 行列の積 → 線形代数の基礎」）．
+* `confirmation_required` は，`message`（「この操作は次の内容に影響します．」）と，`confirmation` の `affected_maps` と `deleted_nodes` を返す．
 * `affected_maps` は操作したマップ以外に反映されるマップ，`deleted_nodes` はこの操作で削除される，進捗のあるノードである．該当がなければ空の配列とする．
 
-**`GET /api/maps/:id/generation` SSE イベント形式**
+**`GET /api/maps/:id/generation` SSE イベント形式**（`streamMapGeneration`．各イベントの `data` の形は `NodeEvent` / `DoneEvent` / `ErrorEvent` / `DeletedEvent`）
 
 レスポンスの `Content-Type` は `text/event-stream` とする．各イベントは `event:` 行と `data:` 行（JSON を1行で記載）からなり，空行で区切る（4.5.6 の CLI の受信方式と同じ）．CLI は `Authorization: Bearer <token>` で認証する（4.5.4）．ブラウザは `new EventSource(url, { withCredentials: true })` でつなぎ，ログインの Cookie で認証する（4.6）．`EventSource` はリクエストヘッダーを指定できないが，Cookie セッションなら追加のヘッダーは要らない．
 
@@ -952,24 +755,10 @@ SSE は生成ジョブ（4.2.9）から直接ではなく，DB から読んで�
 | `error` | マップが `failed` になったとき | 終端イベント． |
 | `deleted` | マップが削除されたとき | 終端イベント．エラーではない． |
 
-* `node` の `data` は次の項目を持つ．ID はすべて DB 保存後の ID とする．`GET /api/maps/:id` のノード表現と共通する項目は，同じ名前・意味とする．
-
-  | 項目 | 型 | 説明 |
-  | :--- | :--- | :--- |
-  | `id` | number | `nodes.id` |
-  | `title` | string | ノードのタイトル |
-  | `summary` | string | ノードの概要 |
-  | `is_main` | boolean | このマップのメインノードなら `true`，サブノードなら `false` |
-  | `parent_node_id` | number \| null | サブノードの場合，そのサブノードを持つノードの ID．メインノードの場合は `null` |
-  | `from` | number[] | このノードへ道がのびてくるノードの ID．メインノードならこのマップの `map_paths`，サブノードなら同じノードの中の `sub_node_paths` |
-  | `importance_score` | number \| null | メインノードの場合のみ（0〜1） |
-  | `reused` | boolean | 既存ノードを再利用した場合 `true`（F-015） |
-  | `progress` | string | 現在の進捗．再利用した既知ノードは学習中・完了で届くことがあり，F-009 の演出に使う |
-  | `detour` | object \| null | メインノードの場合のみ．寄り道（`id`，`title`，`reason`） |
-
+* `node` の `data`（`NodeEvent`）は1ノードの内容，メインノードかサブノードか，道がのびてくるノード（`from`），重要度，再利用したか，現在の進捗，寄り道を持つ．ID はすべて DB 保存後の ID とする．`GET /api/maps/:id` のノード表現と共通する項目は，同じ名前・意味とする．`progress` は再利用した既知ノードでは学習中・完了で届くことがあり，F-009 の演出に使う．
 * 再利用したノードの既存のサブノードは，そのノードの `node` イベントの後に，`reused: true` の `node` イベントとして送る．
-* `done` の `data` は `map_id`，`status`（`"ready"` 固定），`node_count`（送ったノード数）を持つ．
-* `error` の `data` は `code`，`message`，`retryable` を持つ．`code` は `maps.generation_error_code` に保存した値である．`message` は利用者に表示してよい文言で，バックエンドが持つ「コード→文言」の対応表から作る（SSE と REST で共通）．内部例外の詳細や API キーは含めず，それらはサーバーログにだけ出す．文言を保存せずコードから作るのは，例外のメッセージをそのまま保存・表示してしまう事故（内部の詳細や API キーの断片の漏えい）を構造上起こさないため，文言を直したときに過去に失敗したマップの表示にも反映されるようにするため，SSE と REST で同じ表現にするためである．`retryable` は，クライアントがマップを削除して作り直すことを勧めてよいかを示す（同じマップでの生成のやり直しはない．4.2.9）．
+* `done` の `data`（`DoneEvent`）は送ったノード数を持つ．
+* `error` の `data`（`ErrorEvent`）は `code`，`message`，`retryable` を持つ．`code` は `maps.generation_error_code` に保存した値である．`message` は利用者に表示してよい文言で，バックエンドが持つ「コード→文言」の対応表から作る（SSE と REST で共通）．内部例外の詳細や API キーは含めず，それらはサーバーログにだけ出す．文言を保存せずコードから作るのは，例外のメッセージをそのまま保存・表示してしまう事故（内部の詳細や API キーの断片の漏えい）を構造上起こさないため，文言を直したときに過去に失敗したマップの表示にも反映されるようにするため，SSE と REST で同じ表現にするためである．`retryable` は，クライアントがマップを削除して作り直すことを勧めてよいかを示す（同じマップでの生成のやり直しはない．4.2.9）．
 
   | `code` | 意味 | `retryable` |
   | :--- | :--- | :--- |
@@ -981,41 +770,12 @@ SSE は生成ジョブ（4.2.9）から直接ではなく，DB から読んで�
   | `internal_error` | 上記以外のサーバー内部エラー | `false` |
   | `timed_out` | 生成ジョブが一定時間ノードを保存せず，消えたものとみなした（ハートビート切れ．4.2.9） | `true` |
 
+* `parse_failed` の文言は「マップの生成結果を解析できませんでした．このマップを削除して，もう一度作り直してください．」，`llm_api_error` の文言は「生成サービスに接続できませんでした．」とする．
 * `user_api_key_invalid` の文言は「設定した API キーが使えませんでした．設定を確かめてください．」，`user_api_key_quota_exceeded` の文言は「設定した API キーの利用の上限に達したか，支払いに問題があります．設定を確かめてください．」とする．どちらも，設定を直してからマップを削除して作り直せるため `retryable` は `true` とする（4.4 で S-06 へ案内する）．
-* `deleted` の `data` は `map_id` を持つ．文言の対応表には含めない．
+* `deleted` の `data`（`DeletedEvent`）は `map_id` を持つ．文言の対応表には含めない．
 
 * `done`，`error`，`deleted` は終端イベントであり，サーバーはどれかを送った後に接続を閉じる．クライアントは終端イベントを受け取らずに接続が切れた場合，生成が終わったとはみなさず，同じ `GET` でつなぎ直してよい．接続が切れても生成は続く（4.2.9）．接続が切れても生成を続ける理由と，`Last-Event-ID` ではなく全ノードを送り直す方式にした理由は 5.10 と ADR 0004 に示す．
 * 接続維持のため，サーバーはコメント行（`: keep-alive`）を送ってよい．クライアントはコメント行を無視する．
-
-**`GET /api/maps/:id/generation` SSE レスポンス例（正常終了）**
-
-```
-event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[],"importance_score":0.8,"reused":true,"progress":"completed","detour":{"id":77,"title":"ベイズ統計","reason":"確率の更新という考え方に触れる"}}
-
-event: node
-data: {"id":502,"title":"線形代数の基礎","summary":"ベクトルと行列の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[501],"importance_score":0.9,"reused":false,"progress":"not_started","detour":null}
-
-: keep-alive
-
-event: node
-data: {"id":610,"title":"行列の積","summary":"行列どうしの掛け算の意味を学ぶ","is_main":false,"parent_node_id":502,"from":[],"importance_score":null,"reused":false,"progress":"not_started","detour":null}
-
-event: done
-data: {"map_id":123,"status":"ready","node_count":3}
-
-```
-
-**`GET /api/maps/:id/generation` SSE レスポンス例（エラー終了）**
-
-```
-event: node
-data: {"id":501,"title":"統計学の基礎","summary":"データの要約と確率の基本を学ぶ","is_main":true,"parent_node_id":null,"from":[],"importance_score":0.8,"reused":true,"progress":"completed","detour":null}
-
-event: error
-data: {"code":"parse_failed","message":"マップの生成結果を解析できませんでした．このマップを削除して，もう一度作り直してください．","retryable":true}
-
-```
 
 #### 4.3.2 バックエンド–LLM API
 
@@ -1607,6 +1367,11 @@ Web のログインを Google / GitHub だけにしてパスワードを廃止�
 
 ## 7. テスト方針（Test Plan）
 
+* **API の形のテスト**（4.3.1）: API の形の正は `api/openapi.yaml` のスキーマだけとし，作る側と使う側で次のように分けて確かめる．手で書いた JSON の例を正にしないのは，スキーマとずれ得る余計な状態になるためである．
+  * バックエンド（作る側）: `committee` で，テストのリクエストとレスポンスがスキーマに合うかを検証する．バックエンドが返すものの形を保証する．
+  * フロントエンドと CLI（使う側）: 型をスキーマから生成する（フロントエンドは `openapi-typescript`，CLI は `oapi-codegen -generate types`）．テストのフィクスチャ（固定の JSON）は各テストに場面ごとに書き，Prism の検証の中継（Compose のテスト用のサービス）を必ず通す．クライアントが送るリクエストとフィクスチャのレスポンスのどちらかがスキーマに合わなければ，テストが落ちる．クライアントの読み方と送り方を保証する．フィクスチャを共有の例にせず各テストに書くのは，場面ごとに必要な値が違い，例の置き場を増やすとスキーマとずれる状態が増えるためである．
+  * 中身の正しさ（コンパスの候補とその並び，再利用など）はスキーマでは確かめられないため，バックエンドのテストと E2E テストで確かめる．
+  * 実装のときに確かめること: SSE（`text/event-stream`）を Prism と `committee` が検証できるか．できなければ，SSE のイベントの `data`（`NodeEvent` などのスキーマ）の確かめ方を決める issue を起票する．あわせて，4つのツールが OpenAPI 3.1（`type: [integer, 'null']` の書き方など）を読めるかを確かめ，読めなければ issue を起票する．
 * **マップ生成の構造検証**: LLMの出力に対し，JSON Schemaバリデーション，`map_paths`・`sub_node_paths`・`sub_nodes` の循環の検出，未知の参照の検出，ゴールへつながらないメインノード（孤立ノードを含む）の検出，メインノード数が `node_count_target` の範囲（4.2.2）の外にある出力の検出を自動テストで行う（4.2.4）．
 * **既存ノードの再利用のテスト**: 既存ノードを再利用した出力から，`map_nodes`・`sub_nodes`・`progress_statuses` が正しく作られること（新しいノードを作らないこと，既存の進捗を引き継ぐこと，追加したサブノードが他のマップのドリルダウンにも現れること，他ユーザーのノードを参照できないこと）を検証する．元ノードからのマップで，生成したメインノードが元ノードのサブノードにも追加されることも確認する．
   * 再利用したノードの既存のサブノードを `sub_nodes` に書き直したフィクスチャで，`sub_nodes` と `sub_node_paths` が重複せず，出力に書かれなかった既存のサブノードと道も削除されないこと．
@@ -1671,7 +1436,7 @@ Web のログインを Google / GitHub だけにしてパスワードを廃止�
   * ログアウトでその端末のセッションだけが消え，同じユーザーの別の端末のセッションと CLI のトークンは使えること．
   * `FRONTEND_ORIGIN` 以外のオリジンからのリクエストに，CORS の許可（`Access-Control-Allow-Origin`）が返らないこと．
   * DB に保存されるのがセッショントークンのハッシュだけで，平文が残らないこと．
-* **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．ノードの編集については，`409 confirmation_required` で `y/N` の確認を出し，`y` のときだけ `confirmed=true` で送り直すこと，`--new` を付けると提案を出さないことを検証する．トークンファイルが 0600 で保存されることも確認する．
+* **CLI のテスト**: Go 標準の `testing` と `net/http/httptest` で作ったテスト用サーバーに固定の JSON を返させ，CLI 単体で検証する（実際のバックエンド・LLM API は呼ばない）．リクエストとレスポンスは Prism の検証の中継を通す（本章の「API の形のテスト」）．SSE 受信については，1イベントが複数の `data:` 行に分かれる場合，途中で接続が切れる場合，デコードできないイベントが来る場合を検証する．マップの表示については，コンパス候補が API の並びのまま表示されることを検証する．ノードの編集については，`409 confirmation_required` で `y/N` の確認を出し，`y` のときだけ `confirmed=true` で送り直すこと，`--new` を付けると提案を出さないことを検証する．トークンファイルが 0600 で保存されることも確認する．
   * バージョンと接続先（4.5.1，4.5.2）については，`campass version` が埋め込んだバージョンを表示し，埋め込みがなければ `dev` と表示すること，すべてのリクエストに `User-Agent: campass-cli/<バージョン>` が付くこと，`CAMPASS_API_URL` があれば埋め込んだ既定の URL より優先されることを検証する．
   * ログイン（4.5.4）については，テスト用サーバーに `…/token` の応答を順に返させ，`authorization_pending` では `interval` ごとに受け取りを続けること，`slow_down` で間隔が5秒延びること，`access_denied` と `expired_token` でテスト用サーバーが返した `message` を表示して終わること，`200` でトークンを保存すること，待っている間の Ctrl+C で改行を出して終了コード 130 で終わることを検証する．待つ時間は差し替えられるようにし，テストで実際に待たない．ブラウザを開けなくても URL とコードが表示されることも確認する．
   * トークンの期限切れ（4.5.4）については，テスト用サーバーに `401` の `token_expired` と `invalid_token` を返させ，テスト用サーバーが返した `message` を表示し，トークンファイルを消して終了コード 1 で終わること，`campass login` を始めない（`cli_login_requests` を呼ばない）ことを検証する．
@@ -1735,3 +1500,4 @@ Web のログインを Google / GitHub だけにしてパスワードを廃止�
 | v0.20.0 | 2026/10/12 | 学習オプトアウトを API のプランで守る形に変更（#25）．4.3.2 で，リクエストに設定を付けることと送信前の検証をやめ，本番のサービスでは学習に使わない契約のプランのキーだけを使うとし，Gemini のどのプランなら学習に使われないか（規約の URL と確かめた日付），デプロイの手順での確認，利用者のキーは #27 で決めることを追加．3.1 の図，6章，7章のセキュリティテストを整合し，9章に利用者の API キーを追加 | 池田 琉俊 |
 | v0.21.0 | 2026/10/12 | 自分の LLM API キーの設定（ReqDef F-020，#27）を追加．4.1 に `user_llm_credentials` を追加し，`generation_error_code` に `user_api_key_invalid` と `user_api_key_quota_exceeded` を追加．4.2.9 で生成ジョブが始まったときのキーを使い続けるとし，4.3.1 に会社とモデルの候補・キーの設定の API（`GET /api/llm_providers`，`GET` / `PUT` / `DELETE /api/llm_credential`）と保存のときのエラー，ゴール候補の API のエラーを追加．4.3.2 で LLM の抽象インタフェースに「キーとモデルを確かめる」役割を足し，同時に使うのは1社だけとしていた LLM の選び方を，サービスのキーと利用者のキーに分けて書き直し，キーの使い分け（サービスのキーに切り替えない）と，利用者のキーが学習に使わせない約束の対象外であることを追加．4.4 に S-06 設定を追加し，サイドバーを S-06 にも出して下に設定の入口を置いた．4.5.3 に，利用者のキーで失敗したときにブラウザの設定へ案内することを追加．6章に暗号化，鍵の管理，返さない・ログに出さないことを，7章に利用者の API キーのテストを追加し，9章から利用者の API キーを削除 | 池田 琉俊 |
 | v0.21.1 | 2026/10/12 | CLI が表示する API のエラーの文言を，サーバーが返す `message` に一本化（#31）．4.5.4 から重ねて書いていた文言を消し，`access_denied`，`expired_token`，`token_expired`，`invalid_token` では `message` を表示すると書き換えて，文言は 4.3.1 の「コード→文言」の対応表にだけ置くとした．4.3.1 に CLI が `message` をそのまま表示することを注記し，7章の CLI のテストを，テスト用サーバーが返した `message` を表示することの検証に合わせた | 池田 琉俊 |
+| v0.22.0 | 2026/10/12 | API の形の正を `api/openapi.yaml`（OpenAPI 3.1）に移した（#22）．4.3.1 を振る舞いと理由の正とし，JSON の例を消して `operationId` と `components/schemas` の名前で参照する形にした（エラーの文言は表に残した）．エンドポイントの表に `operationId` を加え，形が決まっていない箇所を #43 とした．7章に API の形のテスト（バックエンドは `committee`，フロントエンドと CLI は生成した型と Prism の検証の中継，中身はバックエンドのテストと E2E）と，実装のときに確かめること（SSE と OpenAPI 3.1 をツールが扱えるか）を追加 | 池田 琉俊 |
