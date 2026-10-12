@@ -78,7 +78,7 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 | `POST /api/auth/cli_login_requests/lookup` / `approve` / `deny` | S-04, Web login (Cookie session) only: show the request's `name` and `created_at` / approve / deny, by `user_code`. |
 | `DELETE /api/auth/tokens/current` | CLI logout: revoke the token used for the request. |
 | `GET /api/llm_providers` | Providers and model candidates for a learner's own key (F-020): implemented providers only, models from a config file. |
-| `GET` / `PUT` / `DELETE /api/llm_credential` | A learner's own LLM key (F-020): status (`provider`, `model`, `api_key_last4`, `verified_at`, or `null`) / verify, then save (`422 api_key_invalid` / `model_not_available`, `502 llm_api_error`; nothing saved on failure; Cookie session only, Bearer → `401`) / delete, back to the service's key. Never returns the key. |
+| `GET` / `PUT` / `DELETE /api/llm_credential` | A learner's own LLM key (F-020): status (`provider`, `model`, `api_key_last4`, `verified_at`, or `null`) / verify, then save (`422 api_key_invalid` / `model_not_available`, `502 llm_api_error`; nothing saved on failure) / delete, back to the service's key. `PUT` and `DELETE` accept the Cookie session only (Bearer → `401`, so the CLI cannot change the setting); `GET` accepts both. Never returns the key. |
 
 ## Authentication (F-019, `docs/design_doc.md` section 4.6)
 
