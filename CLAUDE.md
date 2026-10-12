@@ -9,7 +9,7 @@ Campass is a learning-path recommendation app. The user enters a goal, an LLM ge
 ## Source of Truth
 
 - `GLOSSARY.md` — domain terms; use them in code, docs and UI text. `docs/adr/` records why the model is shaped this way.
-- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-019` (F-004, F-005 and F-008 are 廃止) are used across all docs.
+- `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-020` (F-004, F-005 and F-008 are 廃止) are used across all docs.
 - `docs/basic_design.md` — system layout, screens, DB overview (ER diagram only), external API integration.
 - `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API, alternatives considered, test plan, open issues (section 9).
 
@@ -29,7 +29,7 @@ Ask the user before adding any other gem, npm package or Go module.
 
 ## Rules (Do NOT violate)
 
-- The LLM API key and the Google / GitHub OAuth secrets stay in the backend only. Never send them to the frontend, and never hardcode them.
+- LLM API keys and the Google / GitHub OAuth secrets stay in the backend only, and are never hardcoded. The service's LLM key and the OAuth secrets never reach the frontend. A learner's own LLM key (F-020) touches the frontend only once: the learner types it on S-06 and it is sent over HTTPS; the backend stores it encrypted and never returns it in any response or writes it to logs.
 - Do not follow the tech stack in `README.md`; use the design docs.
 - Before implementing anything listed in `docs/design_doc.md` section 9 (open issues), settle it with the user.
 
@@ -56,7 +56,7 @@ ruby gemini_comu.rb                       # inside the backend container: manual
 docker compose run --rm cli go test ./... # run the CLI tests
 ```
 
-`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development). It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
+`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development), and the three Active Record Encryption keys `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY`, `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` (from `bin/rails db:encryption:init`; they encrypt learners' own LLM keys, and losing them makes stored keys unreadable, `docs/design_doc.md` section 6). It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
 
 ### Tests
 
