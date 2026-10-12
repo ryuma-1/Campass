@@ -49,10 +49,10 @@ graph LR
 
     User -->|HTTPS| FE
     User -->|ターミナル| CLI
-    FE -->|REST API / SSE| BE
-    CLI -->|REST API / SSE| BE
+    FE -->|"REST API / SSE"| BE
+    CLI -->|"REST API / SSE"| BE
     BE -->|SQL| DB
-    BE -->|API リクエスト（ストリーミング）| LLM
+    BE -->|"API リクエスト（ストリーミング）"| LLM
 ```
 
 | サブシステム | 役割 |
