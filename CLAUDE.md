@@ -11,7 +11,10 @@ Campass is a learning-path recommendation app. The user enters a goal, an LLM ge
 - `GLOSSARY.md` — domain terms; use them in code, docs and UI text. `docs/adr/` records why the model is shaped this way.
 - `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-020` (F-004, F-005 and F-008 are 廃止) are used across all docs.
 - `docs/basic_design.md` — system layout, screens, DB overview (ER diagram only), external API integration.
-- `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API, alternatives considered, test plan, open issues (section 9).
+- `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API behaviour and reasons (section 4.3.1), alternatives considered, test plan, open issues (section 9).
+- `api/openapi.yaml` (OpenAPI 3.0.3; `committee` cannot read 3.1) — the API's shape: paths, parameters, request and response JSON, status codes, error `code` values, SSE event `data`. No `examples`; the schemas are the only source.
+
+**When you change the API's shape, fix `api/openapi.yaml` and `docs/design_doc.md` section 4.3.1 in the same change.**
 
 **`README.md` is out of date about the tech stack** (it says Next.js / Node.js / PostgreSQL). The actual stack is **React (SPA) + Ruby on Rails (API) + MySQL**. Follow the design docs.
 
@@ -21,7 +24,9 @@ Approved gems (see `backend/Gemfile`): `rails` (~> 7.1.0), `mysql2`, `google-gen
 
 Also approved for Web login (F-019, `docs/design_doc.md` section 4.6), not in the Gemfile yet: `omniauth`, `omniauth-google-oauth2`, `omniauth-github`, `omniauth-rails_csrf_protection`, `rack-cors`.
 
-Approved for the CLI (Go, `cli/`, `docs/design_doc.md` section 4.5.1): `github.com/spf13/cobra` (with its dependencies `spf13/pflag` and `inconshreveable/mousetrap`). HTTP and SSE use the standard library.
+Approved for the CLI (Go, `cli/`, `docs/design_doc.md` section 4.5.1): `github.com/spf13/cobra` (with its dependencies `spf13/pflag` and `inconshreveable/mousetrap`). HTTP and SSE use the standard library. The CLI binary depends only on the standard library and cobra.
+
+Approved for development and tests only, to check the API against `api/openapi.yaml` (`docs/design_doc.md` section 7); none of them ships in production, and none is added yet. Check each one's maintenance and vulnerability record when adding it to its app: `committee` (gem, backend tests), `openapi-typescript` (npm, frontend type generation), `oapi-codegen` (Go tool, CLI type generation only: `-generate types`), Prism (a Compose service for tests, validating proxy).
 
 Ask the user before adding any other gem, npm package or Go module.
 

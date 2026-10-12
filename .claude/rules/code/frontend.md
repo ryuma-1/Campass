@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-React SPA. Design from `docs/basic_design.md` sections 2.2 and 3, and `docs/design_doc.md` section 4.4. Not implemented yet; the directory layout and libraries (router, state management, graph rendering) are not chosen. Ask the user before adding any npm package.
+React SPA. Design from `docs/basic_design.md` sections 2.2 and 3, and `docs/design_doc.md` section 4.4. API shapes are defined in `api/openapi.yaml` (generate types with `openapi-typescript`), behaviour in `docs/design_doc.md` section 4.3.1. Not implemented yet; the directory layout and libraries (router, state management, graph rendering) are not chosen. Ask the user before adding any npm package.
 
 ## Layers
 
