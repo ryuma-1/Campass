@@ -49,6 +49,7 @@ The pipeline runs in a background job (ActiveJob `:async`) started by `POST /api
 
 - Save one node per transaction. Lock the `maps` row first (`SELECT … FOR UPDATE`); if the map is gone, close the LLM stream, log, and stop quietly; if it is no longer `generating`, stop without saving. Update `maps.generation_heartbeat_at` after each save.
 - On an exception, set `status = failed` and `generation_error_code`. Log the details; never store the exception message.
+- Read the learner's `user_llm_credentials` (or the service's key) once when the job starts and build the LLM client from it for the whole job; pass only the map to the job, never the key (ActiveJob serializes and logs arguments). See `llm-integration.md` for which key to use.
 - A `generating` map whose heartbeat is older than the limit (5 minutes to start with) is set to `failed` / `timed_out` by the SSE loop and by map-reading APIs.
 - The SSE controller never receives nodes from the job. On every connection it sends all saved nodes, then polls the DB for new ones, and ends with `done`, `error` or `deleted`.
 
@@ -76,6 +77,8 @@ Defined in `docs/design_doc.md` section 4.3.1 (response examples are there too).
 | `POST /api/auth/cli_login_requests`, `POST /api/auth/cli_login_requests/token` | CLI login by device code (design_doc 4.5.4), no auth: create a login request (`name` → `device_code`, `user_code`, `verification_uri`, `expires_in`, `interval`) / poll for the token with `device_code`. |
 | `POST /api/auth/cli_login_requests/lookup` / `approve` / `deny` | S-04, Web login (Cookie session) only: show the request's `name` and `created_at` / approve / deny, by `user_code`. |
 | `DELETE /api/auth/tokens/current` | CLI logout: revoke the token used for the request. |
+| `GET /api/llm_providers` | Providers and model candidates for a learner's own key (F-020): implemented providers only, models from a config file. |
+| `GET` / `PUT` / `DELETE /api/llm_credential` | A learner's own LLM key (F-020): status (`provider`, `model`, `api_key_last4`, `verified_at`, or `null`) / verify, then save (`422 api_key_invalid` / `model_not_available`, `502 llm_api_error`; nothing saved on failure) / delete, back to the service's key. `PUT` and `DELETE` accept the Cookie session only (Bearer → `401`, so the CLI cannot change the setting); `GET` accepts both. Never returns the key. |
 
 ## Authentication (F-019, `docs/design_doc.md` section 4.6)
 
