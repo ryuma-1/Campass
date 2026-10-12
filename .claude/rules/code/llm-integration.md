@@ -46,7 +46,7 @@ Specific to structured output (Gemini):
 ## Prompt safety
 
 - Keep the system prompt separate from user input. Never put user free text into the instruction part of the prompt.
-- Always attach the opt-out setting (no training on user data) to every LLM request (`docs/basic_design.md` section 5.4).
+- In production, use only an LLM API key from a plan whose terms say inputs and outputs are not used for training (Gemini: a Cloud project with billing enabled). Do not add a per-request opt-out setting or a check before sending; the deploy steps check the key instead. Development (test data only) is exempt. User-supplied API keys are decided in #27 (`docs/design_doc.md` section 4.3.2).
 
 ## Prompt templates
 

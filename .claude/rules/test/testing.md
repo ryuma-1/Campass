@@ -27,7 +27,7 @@ From `docs/design_doc.md` section 7:
 - **Map `updated_at`**: generation (node saves, `status` changes), progress updates and edits made from a map touch that map's `updated_at`; another map containing the same nodes is never touched by shared edits, progress updates, sub nodes added by reuse, origin-node sub node changes or nodes deleted with a map; `GET /api/maps` sorts by `updated_at` desc, then `id` desc.
 - **Map deletion**: nodes used by other maps keep their progress; unreferenced nodes are deleted.
 - **Web auth (F-019, `docs/design_doc.md` section 4.6)**, with omniauth mocks (never the real Google / GitHub): first login creates the user and identity, and later logins find it by `provider` + `provider_uid` even if the email changed; a matching verified email merges into the existing user, no verified email means no login and no user; `return_to` such as `//evil.example.com` or an absolute URL becomes `/maps`, and the redirect origin is always `FRONTEND_ORIGIN`; Cookie-session writes without the CSRF token or with another `Origin` get `403` and change nothing, Bearer requests pass; a session unused for 30 days gets `401`, using it extends it (no write within a day of the last update); logout deletes only that device's session; CORS is not granted to origins other than `FRONTEND_ORIGIN`; only the token digest is stored.
-- **Security**: API keys are absent from frontend responses and source maps; the opt-out setting is always sent.
+- **Security**: API keys are absent from frontend responses and source maps. No-training is kept by the API plan, not by the request, so it is checked in the deploy steps, not by tests (`docs/design_doc.md` section 4.3.2).
 
 ## LLM calls in tests
 

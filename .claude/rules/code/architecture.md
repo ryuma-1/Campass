@@ -23,7 +23,7 @@ graph LR
     FEApp -->|REST| BEApp
     BEApp -.->|SSE: one event per node| FEApp
     BEApp -->|ActiveRecord| DB
-    BEApp -->|streaming request, opt-out on| LLM
+    BEApp -->|streaming request, no-training plan key| LLM
 ```
 
 - The frontend talks only to the backend. Only the backend calls the LLM API and holds its key.
