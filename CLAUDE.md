@@ -12,7 +12,7 @@ Campass is a learning-path recommendation app. The user enters a goal, an LLM ge
 - `docs/ReqDef.md` — requirements. Feature IDs `F-001`…`F-020` (F-004, F-005 and F-008 are 廃止) are used across all docs.
 - `docs/basic_design.md` — system layout, screens, DB overview (ER diagram only), external API integration.
 - `docs/design_doc.md` — table definitions (source of truth, section 4.1.2), algorithms, REST/SSE API behaviour and reasons (section 4.3.1), alternatives considered, test plan, open issues (section 9).
-- `api/openapi.yaml` (OpenAPI 3.1) — the API's shape: paths, parameters, request and response JSON, status codes, error `code` values, SSE event `data`. No `examples`; the schemas are the only source.
+- `api/openapi.yaml` (OpenAPI 3.0.3; `committee` cannot read 3.1) — the API's shape: paths, parameters, request and response JSON, status codes, error `code` values, SSE event `data`. No `examples`; the schemas are the only source.
 
 **When you change the API's shape, fix `api/openapi.yaml` and `docs/design_doc.md` section 4.3.1 in the same change.**
 

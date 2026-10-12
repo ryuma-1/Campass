@@ -1,7 +1,8 @@
 # API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラー）の正．
 # 振る舞いと理由の正は docs/design_doc.md 4.3.1．API の形を変えるときは，この文書と 4.3.1 を同じ変更で直す．
 # examples / example は書かない（正はスキーマだけ）．format は date-time 以外を使わない．
-openapi: 3.1.0
+# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 7章）．null を許す値は nullable: true，$ref に null や説明を足すときは allOf で包む．
+openapi: 3.0.3
 info:
   title: Campass API
   version: 0.1.0
@@ -9,7 +10,7 @@ info:
     Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いと理由は docs/design_doc.md 4.3.1 を参照する．
     ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（design_doc 4.6）．
     Cookie セッションの書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` が要り，`Origin` が `FRONTEND_ORIGIN` と一致しなければならない．合わなければ `403 invalid_csrf`．
-    SSE（`GET /api/maps/{id}/generation`）は OpenAPI 3.1 では本文を文字列としてしか書けないため，各イベントの `data` の形を `components/schemas` に置き，説明文から参照する．使うツール（Prism，committee，openapi-typescript，oapi-codegen）が対応していると確かめられたら OpenAPI 3.2 に上げ，`itemSchema` で書いてよい．
+    SSE（`GET /api/maps/{id}/generation`）は OpenAPI 3.0 では本文を文字列としてしか書けないため，各イベントの `data` の形を `components/schemas` に置き，説明文から参照する．使うツール（Prism，committee，openapi-typescript，oapi-codegen）が対応していると確かめられたら OpenAPI 3.2 に上げ，`itemSchema` で書いてよい．
 
 tags:
   - name: auth
@@ -1133,14 +1134,14 @@ components:
         - type: object
           properties:
             code:
-              const: invalid_csrf
+              enum: [invalid_csrf]
     InvalidUserCodeError:
       allOf:
         - $ref: '#/components/schemas/Error'
         - type: object
           properties:
             code:
-              const: invalid_user_code
+              enum: [invalid_user_code]
     CliLoginTokenError:
       allOf:
         - $ref: '#/components/schemas/Error'
@@ -1154,7 +1155,7 @@ components:
         - type: object
           properties:
             code:
-              const: llm_api_error
+              enum: [llm_api_error]
     LlmCredentialError:
       allOf:
         - $ref: '#/components/schemas/Error'
@@ -1175,7 +1176,7 @@ components:
         - type: object
           properties:
             code:
-              const: map_not_ready
+              enum: [map_not_ready]
     ConfirmationRequiredError:
       allOf:
         - $ref: '#/components/schemas/Error'
@@ -1183,7 +1184,7 @@ components:
           required: [confirmation]
           properties:
             code:
-              const: confirmation_required
+              enum: [confirmation_required]
             confirmation:
               type: object
               required: [affected_maps, deleted_nodes]
@@ -1213,7 +1214,7 @@ components:
           required: [cycle]
           properties:
             code:
-              const: cycle
+              enum: [cycle]
             cycle:
               type: array
               description: 循環するノードの ID の並び（最初と最後が同じ）．
@@ -1225,7 +1226,7 @@ components:
         - type: object
           properties:
             code:
-              const: already_placed
+              enum: [already_placed]
     MapError:
       type: object
       description: '`failed` のマップの理由．'
@@ -1267,7 +1268,8 @@ components:
       type: object
       properties:
         name:
-          type: [string, 'null']
+          type: string
+          nullable: true
           description: CLI のマシン名（`os.Hostname()`）．
     CliLoginRequestCreated:
       type: object
@@ -1313,7 +1315,8 @@ components:
       required: [name, created_at]
       properties:
         name:
-          type: [string, 'null']
+          type: string
+          nullable: true
         created_at:
           $ref: '#/components/schemas/Timestamp'
 
@@ -1364,9 +1367,9 @@ components:
       required: [llm_credential]
       properties:
         llm_credential:
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/LlmCredential'
-            - type: 'null'
+          nullable: true
 
     # ------------------------------------------------ maps
     GoalSuggestionRequest:
@@ -1387,10 +1390,12 @@ components:
         difficulty:
           $ref: '#/components/schemas/Difficulty'
         origin_node_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
           description: 元ノードから作るとき（F-017）．
         detour_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
           description: 寄り道から作るとき（F-006）．
     MapCreated:
       type: object
@@ -1407,12 +1412,14 @@ components:
         status:
           $ref: '#/components/schemas/MapStatus'
         origin_node_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
         created_at:
           $ref: '#/components/schemas/Timestamp'
     MapOrigin:
       description: 元ノードから作ったマップの元ノード．形は design_doc 4.3.1 に書かれていない（例は `null` だけ，#43）．
-      type: [object, 'null']
+      type: object
+      nullable: true
     DetourStart:
       type: object
       description: 寄り道から作ったマップの出発点．
@@ -1439,14 +1446,15 @@ components:
         status:
           $ref: '#/components/schemas/MapStatus'
         error:
-          $ref: '#/components/schemas/MapError'
+          allOf:
+            - $ref: '#/components/schemas/MapError'
           description: '`failed` のときだけ持つ．'
         origin:
           $ref: '#/components/schemas/MapOrigin'
         detour_start:
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/DetourStart'
-            - type: 'null'
+          nullable: true
         updated_at:
           $ref: '#/components/schemas/Timestamp'
     MapList:
@@ -1477,13 +1485,14 @@ components:
           minimum: 0
           description: 1以上ならマップ間ノード．
         origin_of_map_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
           description: このノードを元ノードとして作ったマップ．
         spawned_detour_map:
           description: このノードの寄り道から作ったマップ．
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/MapRef'
-            - type: 'null'
+          nullable: true
         also_inside:
           type: array
           description: このマップでこのノードを中に含む別のメインノード（ADR 0006）．
@@ -1502,7 +1511,8 @@ components:
       required: [current_node_id, candidates, is_goal_reached]
       properties:
         current_node_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
           description: 現在地．`null` はスタート地点．
         candidates:
           type: array
@@ -1529,9 +1539,9 @@ components:
           $ref: '#/components/schemas/MapStatus'
         error:
           description: '`failed` のときだけ持ち，それ以外は `null`．'
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/MapError'
-            - type: 'null'
+          nullable: true
         origin:
           $ref: '#/components/schemas/MapOrigin'
         graph:
@@ -1548,9 +1558,9 @@ components:
                 $ref: '#/components/schemas/MapPath'
         compass:
           description: '`ready` のときだけ持ち，それ以外は `null`．'
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/Compass'
-            - type: 'null'
+          nullable: true
     MapDeletionPreview:
       type: object
       description: レスポンスの形は design_doc 4.3.1 に書かれていない（#43）．4.3.1 の表は「そのマップで学習中にしたノードと，他のマップに残るノードの数を返す」とだけ書く．
@@ -1570,7 +1580,8 @@ components:
         is_main:
           type: boolean
         parent_node_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
           description: サブノードなら，それを持つノードの ID．メインノードなら `null`．
         from:
           type: array
@@ -1579,26 +1590,25 @@ components:
             $ref: '#/components/schemas/Id'
         importance_score:
           description: メインノードのときだけ．サブノードなら `null`．
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/ImportanceScore'
-            - type: 'null'
+          nullable: true
         reused:
           type: boolean
         progress:
           $ref: '#/components/schemas/Progress'
         detour:
           description: メインノードのときだけ．
-          oneOf:
-            - type: object
-              required: [id, title, reason]
-              properties:
-                id:
-                  $ref: '#/components/schemas/Id'
-                title:
-                  type: string
-                reason:
-                  type: string
-            - type: 'null'
+          type: object
+          required: [id, title, reason]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            title:
+              type: string
+            reason:
+              type: string
+          nullable: true
     DoneEvent:
       type: object
       description: '`event: done` の `data`（終端）．'
@@ -1607,7 +1617,7 @@ components:
         map_id:
           $ref: '#/components/schemas/Id'
         status:
-          const: ready
+          enum: [ready]
         node_count:
           type: integer
           description: 送ったノード数．
@@ -1645,27 +1655,28 @@ components:
           $ref: '#/components/schemas/Progress'
         detour:
           description: このマップでの寄り道．
-          oneOf:
-            - type: object
-              required: [id, title, reason, spawned_map_id]
-              properties:
-                id:
-                  $ref: '#/components/schemas/Id'
-                title:
-                  type: string
-                reason:
-                  type: string
-                spawned_map_id:
-                  type: [integer, 'null']
-                  description: この寄り道から作ったマップ．
-            - type: 'null'
+          type: object
+          required: [id, title, reason, spawned_map_id]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            title:
+              type: string
+            reason:
+              type: string
+            spawned_map_id:
+              type: integer
+              nullable: true
+              description: この寄り道から作ったマップ．
+          nullable: true
         other_maps:
           type: array
           description: このノードが登場する他のマップ．
           items:
             $ref: '#/components/schemas/MapRef'
         origin_of_map_id:
-          type: [integer, 'null']
+          type: integer
+          nullable: true
     ProgressUpdate:
       type: object
       required: [status]
@@ -1684,9 +1695,9 @@ components:
           $ref: '#/components/schemas/Compass'
         origin_completion_suggestion:
           description: この更新でゴールに到達し，マップに元ノードがあるときだけ．それ以外は `null`．
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/NodeRef'
-            - type: 'null'
+          nullable: true
     SubNodeGraph:
       type: object
       description: ノードの内容とサブノード群，その間の道．形は design_doc 4.3.1 に書かれていない（#43）．
@@ -1725,7 +1736,8 @@ components:
         summary:
           type: string
         importance:
-          $ref: '#/components/schemas/Importance'
+          allOf:
+            - $ref: '#/components/schemas/Importance'
           description: 省略時は `mid`．
       oneOf:
         - required: [node_id]
@@ -1749,7 +1761,8 @@ components:
       required: [map_id]
       properties:
         map_id:
-          $ref: '#/components/schemas/Id'
+          allOf:
+            - $ref: '#/components/schemas/Id'
           description: 操作したマップ．
         title:
           type: string
@@ -1761,7 +1774,8 @@ components:
       required: [map_id]
       properties:
         map_id:
-          $ref: '#/components/schemas/Id'
+          allOf:
+            - $ref: '#/components/schemas/Id'
           description: 操作したマップ．
         node_id:
           $ref: '#/components/schemas/Id'
@@ -1781,5 +1795,6 @@ components:
         to_node_id:
           $ref: '#/components/schemas/Id'
         map_id:
-          $ref: '#/components/schemas/Id'
+          allOf:
+            - $ref: '#/components/schemas/Id'
           description: 操作したマップ．
