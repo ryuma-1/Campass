@@ -34,7 +34,7 @@ Ask the user before adding any other gem, npm package or Go module.
 
 ## Rules (Do NOT violate)
 
-- LLM API keys and the Google / GitHub OAuth secrets stay in the backend only, and are never hardcoded. The service's LLM key and the OAuth secrets never reach the frontend. A learner's own LLM key (F-020) touches the frontend only once: the learner types it on S-06 and it is sent over HTTPS; the backend stores it encrypted and never returns it in any response or writes it to logs.
+- LLM API keys and the Google / GitHub OAuth secrets stay in the backend only, and are never hardcoded. The service's LLM key and the OAuth secrets never reach the frontend. A learner's own LLM key (F-020) touches the frontend only once: the learner types it on S-05 and it is sent over HTTPS; the backend stores it encrypted and never returns it in any response or writes it to logs.
 - Do not follow the tech stack in `README.md`; use the design docs.
 - Before implementing anything listed in `docs/design_doc.md` section 9 (open issues), settle it with the user.
 

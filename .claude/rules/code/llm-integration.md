@@ -5,7 +5,7 @@ Rules for code that calls the LLM API. Based on `docs/design_doc.md` sections 4.
 ## API keys
 
 - The service's LLM API key lives only in backend environment variables (`.env` → container env). It must never appear in frontend code, API responses, or source maps.
-- A learner's own key (F-020, `docs/design_doc.md` sections 4.3.1, 4.3.2 and 6) is sent once from S-06 (`PUT /api/llm_credential`; `PUT` and `DELETE` are Cookie session only, Bearer → `401`, so the CLI cannot change it) and stored in `user_llm_credentials.api_key` with Active Record Encryption (non-deterministic). Never return it in any response (only `provider`, `model`, `api_key_last4`, `verified_at`), never log it (`filter_parameters` includes `api_key`; keep it out of exception messages and error bodies), never pass it as a job argument, and send it to Gemini in the `x-goog-api-key` header, never in the URL.
+- A learner's own key (F-020, `docs/design_doc.md` sections 4.3.1, 4.3.2 and 6) is sent once from S-05 (`PUT /api/llm_credential`; `PUT` and `DELETE` are Cookie session only, Bearer → `401`, so the CLI cannot change it) and stored in `user_llm_credentials.api_key` with Active Record Encryption (non-deterministic). Never return it in any response (only `provider`, `model`, `api_key_last4`, `verified_at`), never log it (`filter_parameters` includes `api_key`; keep it out of exception messages and error bodies), never pass it as a job argument, and send it to Gemini in the `x-goog-api-key` header, never in the URL.
 - The root `.env` reaches the `backend` container only, through Compose `env_file`; `frontend` and `cli` never get it. The file itself is not mounted, so `Dotenv.load` in `backend/gemini_comu.rb` finds nothing and the key comes from `ENV`. Rails code should read keys from `ENV`.
 
 ## Structured output
@@ -48,7 +48,7 @@ Specific to structured output (Gemini):
 ## Prompt safety
 
 - Keep the system prompt separate from user input. Never put user free text into the instruction part of the prompt.
-- In production, use only an LLM API key from a plan whose terms say inputs and outputs are not used for training (Gemini: a Cloud project with billing enabled). Do not add a per-request opt-out setting or a check before sending; the deploy steps check the key instead. Development (test data only) is exempt. A learner's own key (F-020) is outside this promise: their inputs follow the learner's own terms with that provider, and S-06 says so (`docs/design_doc.md` section 4.3.2).
+- In production, use only an LLM API key from a plan whose terms say inputs and outputs are not used for training (Gemini: a Cloud project with billing enabled). Do not add a per-request opt-out setting or a check before sending; the deploy steps check the key instead. Development (test data only) is exempt. A learner's own key (F-020) is outside this promise: their inputs follow the learner's own terms with that provider, and S-05 says so (`docs/design_doc.md` section 4.3.2).
 
 ## Prompt templates
 
