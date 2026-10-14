@@ -1,14 +1,14 @@
 # API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラー）の正．
-# 振る舞いと理由の正は docs/design_doc.md 4.3.1．API の形を変えるときは，この文書と 4.3.1 を同じ変更で直す．
+# 振る舞いの正は docs/basic_design.md 7.1（理由は docs/design_doc.md 4.6）．API の形を変えるときは，この文書と basic_design 7.1 を同じ変更で直す．
 # examples / example は書かない（正はスキーマだけ）．format は date-time 以外を使わない．
-# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 7章）．null を許す値は nullable: true，$ref に null や説明を足すときは allOf で包む．
+# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 4.6）．null を許す値は nullable: true，$ref に null や説明を足すときは allOf で包む．
 openapi: 3.0.3
 info:
   title: Campass API
   version: 0.1.0
   description: |
-    Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いと理由は docs/design_doc.md 4.3.1 を参照する．
-    ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（design_doc 4.6）．
+    Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いは docs/basic_design.md 7.1 を参照する．
+    ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（basic_design 7.3）．
     Cookie セッションの書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` が要り，`Origin` が `FRONTEND_ORIGIN` と一致しなければならない．合わなければ `403 invalid_csrf`．
     SSE（`GET /api/maps/{id}/generation`）は OpenAPI 3.0 では本文を文字列としてしか書けないため，各イベントの `data` の形を `components/schemas` に置き，説明文から参照する．使うツール（Prism，committee，openapi-typescript，oapi-codegen）が対応していると確かめられたら OpenAPI 3.2 に上げ，`itemSchema` で書いてよい．
 
@@ -100,7 +100,7 @@ paths:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
         2XX:
-          description: ログアウトした．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+          description: ログアウトした．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -120,7 +120,7 @@ paths:
               $ref: '#/components/schemas/CliLoginRequestCreate'
       responses:
         2XX:
-          description: ログイン要求を作った．ステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+          description: ログイン要求を作った．ステータスコードは basic_design 7.1 に書かれていない（#43）．
           content:
             application/json:
               schema:
@@ -240,7 +240,7 @@ paths:
         - bearerToken: []
       responses:
         2XX:
-          description: 失効させた．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+          description: 失効させた．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -409,7 +409,7 @@ paths:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
         2XX:
-          description: 削除した．ステータスコードと本文は design_doc 4.3.1 に書かれていない（#43）．
+          description: 削除した．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -490,7 +490,7 @@ paths:
               $ref: '#/components/schemas/GoalSuggestionRequest'
       responses:
         2XX:
-          description: 判定の結果．ステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+          description: 判定の結果．ステータスコードは basic_design 7.1 に書かれていない（#43）．
           content:
             application/json:
               schema:
@@ -924,13 +924,13 @@ components:
       in: cookie
       name: campass_session
       description: |
-        ブラウザのログイン（design_doc 4.6）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
-        Cookie の名前は design_doc に書かれていない（#43）．ここの `campass_session` は仮の名前である．
+        ブラウザのログイン（basic_design 7.3）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
+        Cookie の名前は basic_design に書かれていない（#43）．ここの `campass_session` は仮の名前である．
         書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` ヘッダーと，`FRONTEND_ORIGIN` と一致する `Origin` が要る．
     bearerToken:
       type: http
       scheme: bearer
-      description: CLI のトークン（design_doc 4.5.4）．30日のスライド式．期限切れは `401 token_expired`，一致する行がなければ `401 invalid_token`．
+      description: CLI のトークン（basic_design 7.4）．30日のスライド式．期限切れは `401 token_expired`，一致する行がなければ `401 invalid_token`．
 
   parameters:
     Provider:
@@ -988,8 +988,8 @@ components:
       in: query
       required: false
       description: |
-        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（design_doc 4.2.10）．
-        design_doc は「`confirmed=true` を付けて」とだけ書き，クエリか本文かを決めていない（#43）．ここではクエリとして書く．
+        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（basic_design 6.8）．
+        basic_design は「`confirmed=true` を付けて」とだけ書き，クエリか本文かを決めていない（#43）．ここではクエリとして書く．
       schema:
         type: boolean
     CsrfToken:
@@ -1020,7 +1020,7 @@ components:
           schema:
             $ref: '#/components/schemas/InvalidCsrfError'
     NotFound:
-      description: マップやノードがない，または他ユーザーのもの．本文の形は design_doc 4.3.1 に書かれていない（#43）．
+      description: マップやノードがない，または他ユーザーのもの．本文の形は basic_design 7.1 に書かれていない（#43）．
     InvalidUserCode:
       description: '`user_code` に一致する要求がない，期限切れ，または `pending` でない．'
       content:
@@ -1034,13 +1034,13 @@ components:
           schema:
             $ref: '#/components/schemas/LlmApiError'
     MapEdited:
-      description: 編集した．`GET /api/maps/{id}` と同じ形のマップ全体を返す．POST のステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+      description: 編集した．`GET /api/maps/{id}` と同じ形のマップ全体を返す．POST のステータスコードは basic_design 7.1 に書かれていない（#43）．
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/MapView'
     NodeEdited:
-      description: 編集した．`GET /api/nodes/{id}/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．POST のステータスコードは design_doc 4.3.1 に書かれていない（#43）．
+      description: 編集した．`GET /api/nodes/{id}/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．POST のステータスコードは basic_design 7.1 に書かれていない（#43）．
       content:
         application/json:
           schema:
@@ -1090,7 +1090,7 @@ components:
     GenerationErrorCode:
       type: string
       enum: [parse_failed, invalid_map, llm_api_error, user_api_key_invalid, user_api_key_quota_exceeded, internal_error, timed_out]
-      description: '`maps.generation_error_code` と同じ値．意味と `retryable` は design_doc 4.3.1 の表に従う．'
+      description: '`maps.generation_error_code` と同じ値．意味と `retryable` は basic_design 7.1 の表に従う．'
     NodeRef:
       type: object
       required: [node_id, title]
@@ -1374,10 +1374,10 @@ components:
     # ------------------------------------------------ maps
     GoalSuggestionRequest:
       type: object
-      description: リクエストの形は design_doc 4.3.1 に書かれていない（#43）．
+      description: リクエストの形は basic_design 7.1 に書かれていない（#43）．
     GoalSuggestionResponse:
       type: object
-      description: レスポンスの形は design_doc 4.3.1 に書かれていない（#43）．4.2.1 は LLM の出力として `is_concrete` と最大3件の `candidates`（`title`，`description`）を挙げている．
+      description: レスポンスの形は basic_design 7.1 に書かれていない（#43）．6.2 は LLM の出力として `is_concrete` と最大3件の `candidates`（`title`，`description`）を挙げている．
     MapCreate:
       type: object
       required: [title, goal_text, difficulty]
@@ -1417,7 +1417,7 @@ components:
         created_at:
           $ref: '#/components/schemas/Timestamp'
     MapOrigin:
-      description: 元ノードから作ったマップの元ノード．形は design_doc 4.3.1 に書かれていない（例は `null` だけ，#43）．
+      description: 元ノードから作ったマップの元ノード．形は basic_design 7.1 に書かれていない（例は `null` だけ，#43）．
       type: object
       nullable: true
     DetourStart:
@@ -1563,7 +1563,7 @@ components:
           nullable: true
     MapDeletionPreview:
       type: object
-      description: レスポンスの形は design_doc 4.3.1 に書かれていない（#43）．4.3.1 の表は「そのマップで学習中にしたノードと，他のマップに残るノードの数を返す」とだけ書く．
+      description: レスポンスの形は basic_design 7.1 に書かれていない（#43）．7.1 の表は「そのマップで学習中にしたノードと，他のマップに残るノードの数を返す」とだけ書く．
 
     # ------------------------------------------------ SSE のイベントの data
     NodeEvent:
@@ -1700,7 +1700,7 @@ components:
           nullable: true
     SubNodeGraph:
       type: object
-      description: ノードの内容とサブノード群，その間の道．形は design_doc 4.3.1 に書かれていない（#43）．
+      description: ノードの内容とサブノード群，その間の道．形は basic_design 7.1 に書かれていない（#43）．
     NodeSuggestions:
       type: object
       required: [nodes]
