@@ -156,7 +156,7 @@ paths:
     post:
       operationId: lookupCliLoginRequest
       tags: [auth]
-      summary: S-04 の確認に出す内容（端末名と開始時刻）
+      summary: S-03 の確認に出す内容（端末名と開始時刻）
       security:
         - cookieSession: []
       parameters:
@@ -988,7 +988,7 @@ components:
       in: query
       required: false
       description: |
-        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（basic_design 6.8）．
+        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（basic_design 6.7）．
         basic_design は「`confirmed=true` を付けて」とだけ書き，クエリか本文かを決めていない（#43）．ここではクエリとして書く．
       schema:
         type: boolean
@@ -1127,7 +1127,7 @@ components:
               enum: [unauthenticated, token_expired, invalid_token]
             csrf_token:
               type: string
-              description: '`GET /api/session` の `unauthenticated` でだけ返す（S-05 のフォーム送信に使う）．'
+              description: '`GET /api/session` の `unauthenticated` でだけ返す（S-04 のフォーム送信に使う）．'
     InvalidCsrfError:
       allOf:
         - $ref: '#/components/schemas/Error'
