@@ -1,6 +1,6 @@
 # Overall Architecture
 
-Design as defined in `docs/basic_design.md` section 2 and `docs/design_doc.md` sections 3–4. Nothing below is implemented yet; when implementing, follow these decisions unless the design docs are updated first. Frontend and backend internals are in `frontend.md` and `backend.md`. Domain terms (マップ, ノード, 道, メインノード, サブノード, 寄り道, 元ノード, 既知ノード, …) follow `GLOSSARY.md`; decisions behind the model are in `docs/adr/`.
+Design as defined in `docs/basic-design.md` sections 2 and 6. Nothing below is implemented yet; when implementing, follow these decisions unless the design docs are updated first. Frontend and backend internals are in `frontend.md` and `backend.md`. Domain terms (マップ, ノード, 道, メインノード, サブノード, 寄り道, 元ノード, 既知ノード, …) follow `GLOSSARY.md`; decisions behind the model are in `docs/adr/`.
 
 ## System diagram
 
@@ -28,15 +28,15 @@ graph LR
 
 - The frontend talks only to the backend. Only the backend calls the LLM API and holds its key.
 - Map generation is streamed: LLM tokens → backend buffers until one node is complete → save to DB → one SSE event to the frontend.
-- Generation runs as a background job (ActiveJob `:async`), detached from the request, and continues when the client disconnects. The job only writes to the DB; the SSE endpoint reads saved nodes from the DB, so it can be reconnected any time (`docs/design_doc.md` section 4.2.9, ADR 0004).
+- Generation runs as a background job (ActiveJob `:async`), detached from the request, and continues when the client disconnects. The job only writes to the DB; the SSE endpoint reads saved nodes from the DB, so it can be reconnected any time (`docs/basic-design.md` section 6.4.6, ADR 0004).
 
-## Authentication (F-019, design_doc 4.6)
+## Authentication (F-019, basic-design 7.3)
 
-- The browser logs in with Google or GitHub only (no passwords, no sign-up screen) and is then authenticated by a Cookie session stored in `web_sessions` (SHA-256 digest only, 30 days sliding). The CLI uses Bearer tokens (`api_tokens`, design_doc 4.5.4, also 30 days sliding). The backend accepts either; a request with an `Authorization` header is judged by the Bearer token only.
+- The browser logs in with Google or GitHub only (no passwords, no sign-up screen) and is then authenticated by a Cookie session stored in `web_sessions` (SHA-256 digest only, 30 days sliding). The CLI uses Bearer tokens (`api_tokens`, basic-design 7.4, also 30 days sliding). The backend accepts either; a request with an `Authorization` header is judged by the Bearer token only.
 - Frontend and backend are served on sibling subdomains of one parent domain (`app.` / `api.`): different origins, same site. CORS allows only `FRONTEND_ORIGIN`, with credentials. In development they run as `localhost:5173` and `localhost:3000` with the same CORS setup.
 - Cookie-session writes need the Rails CSRF token (`X-CSRF-Token`, from `GET /api/session`) and an `Origin` equal to `FRONTEND_ORIGIN`; Bearer requests skip both.
 
-## Main flow (design_doc 3.2)
+## Main flow (basic-design 6.1)
 
 ```mermaid
 sequenceDiagram
@@ -71,19 +71,19 @@ sequenceDiagram
 
 ## Shared data model
 
-The map is a DAG stored as relational node + path tables, not in a graph DB (`docs/design_doc.md` section 5.1). Nodes belong to the user and are shared across maps (ADR 0003):
+The map is a DAG stored as relational node + path tables, not in a graph DB (`docs/design-doc.md` section 4.1). Nodes belong to the user and are shared across maps (ADR 0003):
 
 - Shared: `nodes` (title, summary), `sub_nodes` + `sub_node_paths` (a node's contents), `progress_statuses` (one progress per node, plus `started_map_id`).
 - Per map: `map_nodes` (which nodes are main nodes here, `importance_score`), `map_paths` (paths between main nodes), `detours` (max one per main node), `map_progress_events` (progress updates made from this map), `maps.origin_node_id`.
 - A main node may also appear inside another main node of the same map (ADR 0006); it is still placed at most once per map.
 
-Full table definitions: `docs/design_doc.md` section 4.1.2 (the source of truth; `docs/basic_design.md` section 4 is only an overview).
+Full table definitions: `docs/basic-design.md` section 5.4.
 
-The map screen shows this graph as-is. There is **no linear roadmap view and no stored order** (`display_order` and the linearization algorithm were removed in design_doc v0.5.0). Do not reintroduce them.
+The map screen shows this graph as-is. There is **no linear roadmap view and no stored order** (`display_order` and the linearization algorithm were removed in design-doc v0.5.0). Do not reintroduce them.
 
 ## Concept: map + compass
 
-The app's concept (and its name, Campass) is "spread out a map and check the compass": the map shows the whole graph for one goal, and a **compass** points from the learner's **current position** to **every node the learner can study now** (F-013, `docs/design_doc.md` section 4.2.8).
+The app's concept (and its name, Campass) is "spread out a map and check the compass": the map shows the whole graph for one goal, and a **compass** points from the learner's **current position** to **every node the learner can study now** (F-013, `docs/basic-design.md` section 6.6).
 
 - The "map" is a metaphor only. Nodes have no coordinates; the map is drawn as a network graph.
 - Current position is derived per map from `map_progress_events` (ADR 0005): the node of the latest start or completion made from that map, among nodes still placed there and not reset since; none is the start point. Removing that node or resetting it moves the position back.
@@ -92,4 +92,4 @@ The app's concept (and its name, Campass) is "spread out a map and check the com
 
 ## Undecided
 
-The details of F-016 / F-017, shared edits while another map is generating, when regeneration may run once nodes are saved and sent, preventing conflicts between concurrent edits (the last save wins for now), and cleaning up expired `api_tokens` / `web_sessions` / `cli_login_requests` rows are still open (`docs/design_doc.md` section 9). Confirm with the user before implementing them.
+The details of F-016 / F-017, shared edits while another map is generating, when regeneration may run once nodes are saved and sent, preventing conflicts between concurrent edits (the last save wins for now), and cleaning up expired `api_tokens` / `web_sessions` / `cli_login_requests` rows are still open (`docs/design-doc.md` section 6). Confirm with the user before implementing them.
