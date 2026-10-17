@@ -1,3 +1,11 @@
+---
+paths:
+  - "backend/test/**"
+  - "cli/**/*_test.go"
+  - "frontend/**/*.{test,spec}.*"
+  - "e2e/**"
+---
+
 # Testing
 
 No test suite or test framework is set up yet. Do not add a test framework (e.g. RSpec, Jest) without the user's approval, because it is a new dependency.

@@ -1,3 +1,8 @@
+---
+paths:
+  - "frontend/**"
+---
+
 # Frontend Architecture
 
 React SPA. Design from `docs/basic-design.md` sections 2.2, 3 and 6.8. API shapes are defined in `api/openapi.yaml` (generate types with `openapi-typescript`), behaviour in `docs/basic-design.md` section 7.1. Not implemented yet; the directory layout and libraries (router, state management, graph rendering) are not chosen. Ask the user before adding any npm package.

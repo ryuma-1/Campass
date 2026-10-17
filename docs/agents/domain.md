@@ -17,10 +17,7 @@ This repo is single-context:
 ```
 /
 ├── GLOSSARY.md
-└── docs/adr/
-    ├── 0001-unify-notebook-as-map.md
-    ├── 0002-detour-outside-syllabus.md
-    └── 0003-shared-nodes-across-maps.md
+└── docs/adr/        # one file per decision: NNNN-title.md
 ```
 
 ## Use the glossary's vocabulary

@@ -1,3 +1,10 @@
+---
+paths:
+  - "backend/**"
+  - "frontend/**"
+  - "cli/**"
+---
+
 # Overall Architecture
 
 Design as defined in `docs/basic-design.md` sections 2 and 6. Nothing below is implemented yet; when implementing, follow these decisions unless the design docs are updated first. Frontend and backend internals are in `frontend.md` and `backend.md`. Domain terms (マップ, ノード, 道, メインノード, サブノード, 寄り道, 元ノード, 既知ノード, …) follow `GLOSSARY.md`; decisions behind the model are in `docs/adr/`.

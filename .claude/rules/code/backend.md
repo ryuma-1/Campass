@@ -1,3 +1,8 @@
+---
+paths:
+  - "backend/**"
+---
+
 # Backend Architecture
 
 Ruby on Rails 7.1 in API mode. Design from `docs/basic-design.md` sections 2.3, 6 and 7. Not implemented yet (no Rails app has been generated).
@@ -112,3 +117,8 @@ Shapes (parameters, request and response JSON, status codes, error codes, SSE ev
 - **`maps.updated_at` (basic-design 5.5)**: touch it on every side effect made through that map, even when the `maps` row itself does not change: generation (each node save, `status` changes including `timed_out`), progress updates from that map, and edits from that map (map edits and shared edits with that `map_id`). Never on reads. When shared data (`nodes`, `sub_nodes`, `sub_node_paths`, `progress_statuses`) changes through another map (shared edits, progress updates, sub nodes added by reuse in generation, an origin node's sub nodes changed by its map, nodes deleted with another map), never touch the other maps that contain those nodes: a map the learner is not working in must not become the latest. Do not propagate touches from shared tables to `maps` (no `touch: true` across them); touch only the acting map explicitly. The map list and the redirect to the latest map use it.
 - **Map deletion**: cascade `map_nodes`, `map_paths`, `detours`, `map_progress_events`; delete a node only when no map and no node references it.
 - **Editing (F-018, basic-design 6.7)**: only from a `ready` map (`409 map_not_ready`); lock the `maps` row first. Reject edits that make `map_paths`, `sub_node_paths` or `sub_nodes` cyclic with `422 cycle` and the cycle; never fix them silently. Removing a main node deletes its paths and detour (no rewiring), sets its events' `map_node_id` to NULL, and deletes nodes left unreferenced by the map-deletion rule. Edits that reach other maps or delete nodes with progress return `409 confirmation_required` until resent with `confirmed=true`. Importance high / mid / low is stored as 0.9 / 0.5 / 0.1. In a map made from an origin node, placing or removing a main node also changes the origin node's sub nodes.
+
+## Environment
+
+- Rails `database.yml` reads `DB_HOST`, `DB_USER`, `DB_PASSWORD` and `DB_NAME`, which Compose maps from the MySQL values in `.env`.
+- The three `ACTIVE_RECORD_ENCRYPTION_*` keys in `.env` come from `bin/rails db:encryption:init`. They encrypt learners' own LLM keys; losing them makes stored keys unreadable (`docs/basic-design.md` section 7.2).
