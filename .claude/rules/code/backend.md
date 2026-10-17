@@ -54,7 +54,7 @@ The pipeline runs in a background job (ActiveJob `:async`) started by `POST /api
 
 - Save one node per transaction. Lock the `maps` row first (`SELECT … FOR UPDATE`); if the map is gone, close the LLM stream, log, and stop quietly; if it is no longer `generating`, stop without saving. Update `maps.generation_heartbeat_at` after each save.
 - On an exception, set `status = failed` and `generation_error_code`. Log the details; never store the exception message.
-- Read the learner's `user_llm_credentials` (or the service's key) once when the job starts and build the LLM client from it for the whole job; pass only the map to the job, never the key (ActiveJob serializes and logs arguments). See `llm-integration.md` for which key to use.
+- Pass only the map to the job, never the key as an argument (ActiveJob serializes and logs job arguments); see `llm-integration.md` for which key is used and when it is read.
 - A `generating` map whose heartbeat is older than the limit (5 minutes to start with) is set to `failed` / `timed_out` by the SSE loop and by map-reading APIs.
 - The SSE controller never receives nodes from the job. On every connection it sends all saved nodes, then polls the DB for new ones, and ends with `done`, `error` or `deleted`.
 
@@ -104,8 +104,7 @@ Shapes (parameters, request and response JSON, status codes, error codes, SSE ev
 
 ## Core algorithms
 
-- **No linearization.** `display_order` and the topological-sort step were removed (F-005, F-008 are 廃止). Do not add a stored order.
-- **Node reuse (F-015, basic-design 6.4)**: send the user's existing nodes (with their sub nodes) to the LLM; it reuses them by ID instead of creating duplicates, and may write a reused node's full contents. When saving, ignore `sub_nodes` and `sub_node_paths` that already exist (no duplicates), add only new ones, and never delete ones left out of the output (generation never shrinks a shared node). For a map made from an origin node, its new main nodes also become sub nodes of the origin node. Never reuse another user's nodes.
+- **Node reuse (F-015, basic-design 6.4)**: the LLM reuses the user's existing nodes by ID instead of duplicating them (see `llm-integration.md` for the prompt and save-merge rules). For a map made from an origin node, its new main nodes also become sub nodes of the origin node. Never reuse another user's nodes.
 - **Compass (F-013, basic-design 6.6)**: over the map's main nodes, recomputed on every progress update, never stored.
   - Current position: derived from `map_progress_events` of that map (ADR 0005). For each placement (`map_node_id` not NULL) take the latest event; drop `reset`; the newest remaining `started` / `completed` is the current position. Events are only added by progress updates made from that map, and are never deleted when a node is removed.
   - Known node: `completed`, or `in_progress` with `started_map_id` set to another map (`NULL` counts as this map).
