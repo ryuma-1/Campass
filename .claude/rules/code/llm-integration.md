@@ -41,14 +41,13 @@ Specific to structured output (Gemini):
 - Put an abstract LLM interface in the backend with two jobs only: (1) generate: take a system prompt, the conversation and a JSON Schema (or tools), and stream text fragments back; (2) verify a key and model (F-020): say whether the key is valid and the model is usable with it, per provider (Gemini: `GET /v1beta/models`, following `nextPageToken`; it runs no model, so it costs nothing; quota and billing are not checked). The key and model are given to it from outside; it does not know whether they are the service's or a learner's. Node splitting, validation and saving stay outside it and are shared across LLMs. The generation job takes it from outside, so tests use a fake.
 - The first implementation calls Gemini directly with Faraday (`streamGenerateContent?alt=sse`, `systemInstruction`, `responseJsonSchema`). Do not use the `google-genai` gem (0.1.1) for this: it handles neither streaming nor `systemInstruction`. Keep it in the Gemfile.
 - The service's key uses the one provider chosen by `LLM_PROVIDER` (default `gemini`) and `LLM_MODEL` (default `gemini-3.1-flash-lite`). Service API keys are per provider (now `GEMINI_API_KEY`). A learner's own key may use any implemented provider and only the models listed per provider in a config file (`GET /api/llm_providers`); free model names are rejected.
-- Which key (F-020, `docs/basic-design.md` section 7.2): if the learner has a `user_llm_credentials` row, every LLM call for that learner (map generation, goal suggestions) uses that key, provider and model; otherwise the service's. If the learner's key fails, fail with `user_api_key_invalid` (invalid, no permission, or the stored key cannot be decrypted) or `user_api_key_quota_exceeded` (quota or billing); never fall back to the service's key and never retry. The generation job reads the credential once when it starts and keeps it to the end; changing or deleting the key mid-generation does not affect that job.
+- Which key (F-020, `docs/basic-design.md` section 7.2): if the learner has a `user_llm_credentials` row, every LLM call for that learner (map generation, goal suggestions) uses that key, provider and model; otherwise the service's. If the learner's key fails, never fall back to the service's key and never retry (failure codes: `../meta/error.md`). The generation job reads the credential once when it starts and keeps it to the end; changing or deleting the key mid-generation does not affect that job.
 - Before adding a second provider (OpenAI / Anthropic), check its schema and count handling with a prototype as was done for Gemini. Consider LiteLLM (as a proxy) at that point, not before.
 
 ## Streaming
 
-- The backend reads the LLM token stream and buffers it until one node's JSON is complete. It then saves that node to the DB; the SSE endpoint reads saved nodes from the DB and sends each as one event.
-- Never forward partial token fragments to the frontend.
-- Generation runs in a background job and continues when the user leaves or the CLI is stopped (`docs/basic-design.md` section 6.4.6, ADR 0004). There is no cancel; deleting the map stops the job.
+- Never forward partial token fragments to the frontend; only a complete, saved node reaches the SSE stream (see `backend.md` for the buffering and job mechanics).
+- There is no cancel; deleting the map stops the job (`docs/basic-design.md` section 6.4.6, ADR 0004).
 
 ## Prompt safety
 
