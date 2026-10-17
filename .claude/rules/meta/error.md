@@ -1,3 +1,10 @@
+---
+paths:
+  - "backend/**"
+  - "frontend/**"
+  - "cli/**"
+---
+
 # Error Handling
 
 ## General

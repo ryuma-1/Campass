@@ -6,93 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Campass is a learning-path recommendation app. The user enters a goal, an LLM generates a マップ (a graph of nodes and 道), and the app shows it with a compass that points to the nodes the learner can study next ("トップダウン逆算型ボトムアップ学習"). Nodes belong to the user and are shared across maps. There is no linear roadmap view (removed in ReqDef v1.2.0).
 
-## Source of Truth
-
-- `GLOSSARY.md` — domain terms; use them in code, docs and UI text. `docs/adr/` records why the model is shaped this way.
-- `docs/req-def.md` — requirements only, as users and operators see them (no tech, tables, APIs or algorithms). Feature IDs `F-001`…`F-020` (F-004, F-005 and F-008 are 廃止) are used across all docs.
-- `docs/basic-design.md` — the source of truth for every concrete spec: system layout and tech stack (section 2), screens (3), CLI (4), table definitions (5.4), processing rules (6), REST/SSE API behaviour (7.1), LLM API (7.2), Web and CLI auth (7.3, 7.4), test design (8). No reasons; it links to the design doc instead.
-- `docs/design-doc.md` — why only: trade-offs, alternatives considered, concerns (section 5), open issues (section 6). No spec; it links to basic-design.
-- `api/openapi.yaml` (OpenAPI 3.0.3; `committee` cannot read 3.1) — the API's shape: paths, parameters, request and response JSON, status codes, error `code` values, SSE event `data`. No `examples`; the schemas are the only source.
-
-**When you change the API's shape, fix `api/openapi.yaml` and `docs/basic-design.md` section 7.1 in the same change.**
-
-Each doc states only its own role: put each statement in the one doc its role allows, and link to it from the others.
-
-## External Packages
-
-Approved gems (see `backend/Gemfile`): `rails` (~> 7.1.0), `mysql2`, `google-genai`, `dotenv`, `faraday` (used directly to call the LLM, `docs/basic-design.md` section 7.2; for now it is only in the Gemfile.lock as a `google-genai` dependency). Ruby 4.0.5.
-
-Also approved for Web login (F-019, `docs/basic-design.md` section 7.3), not in the Gemfile yet: `omniauth`, `omniauth-google-oauth2`, `omniauth-github`, `omniauth-rails_csrf_protection`, `rack-cors`.
-
-Approved for the CLI (Go, `cli/`, `docs/basic-design.md` section 4.1): `github.com/spf13/cobra` (with its dependencies `spf13/pflag` and `inconshreveable/mousetrap`). HTTP and SSE use the standard library. The CLI binary depends only on the standard library and cobra.
-
-Approved for development and tests only, to check the API against `api/openapi.yaml` (`docs/basic-design.md` section 8); none of them ships in production, and none is added yet. Check each one's maintenance and vulnerability record when adding it to its app: `committee` (gem, backend tests), `openapi-typescript` (npm, frontend type generation), `oapi-codegen` (Go tool, CLI type generation only: `-generate types`), Prism (a Compose service for tests, validating proxy).
-
-Ask the user before adding any other gem, npm package or Go module.
-
----
-
 ## Rules (Do NOT violate)
 
 - LLM API keys and the Google / GitHub OAuth secrets stay in the backend only, and are never hardcoded. The service's LLM key and the OAuth secrets never reach the frontend. A learner's own LLM key (F-020) touches the frontend only once: the learner types it on S-05 and it is sent over HTTPS; the backend stores it encrypted and never returns it in any response or writes it to logs.
 - Before implementing anything listed in `docs/design-doc.md` section 6 (open issues), settle it with the user.
+- Edit `docs/`, `api/openapi.yaml` and `GLOSSARY.md` only when the user asks.
+- Ask the user before adding any gem, npm package or Go module not approved in `.claude/rules/meta/dependencies.md`.
 
 ---
 
 ## Commands
 
-The repo is split into `backend/` (Rails API), `frontend/` (React SPA, empty for now) and `cli/` (Go CLI, empty for now). Everything runs through Docker Compose, one service per directory, each mounting its directory at `/app`:
-
-| Service | Image | Mount | Starts by default |
-| :--- | :--- | :--- | :--- |
-| `backend` | built from `backend/Dockerfile` (Ruby 4.0.5) | `./backend:/app` | yes |
-| `db` | MySQL 8.0 | — | yes |
-| `frontend` | `node:24.21.0-slim` (Node.js LTS), port 5173 | `./frontend:/app` | no (`profiles: frontend` until the React app exists) |
-| `cli` | `golang:1.27.2` | `./cli:/app` | no (`profiles: cli`) |
-
-Gems are kept in the `bundle_data` volume.
+The repo is split into `backend/` (Rails API), `frontend/` (React SPA, empty for now) and `cli/` (Go CLI, empty for now). Everything runs through Docker Compose (`docker-compose.yml`), one service per directory, each mounting its directory at `/app`.
 
 ```bash
-docker compose up -d --build              # start backend + db
-docker compose exec backend bash          # shell in the backend container (/app = backend/)
-bundle install                            # inside the backend container
-ruby gemini_comu.rb                       # inside the backend container: manual Gemini API check
-docker compose run --rm cli go test ./... # run the CLI tests
+docker compose up -d --build                     # start backend + db
+docker compose exec backend bundle install       # install gems
+docker compose exec backend ruby gemini_comu.rb  # manual Gemini API check
+docker compose run --rm cli go test ./...        # run the CLI tests
 ```
 
-`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development), and the three Active Record Encryption keys `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY`, `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` (from `bin/rails db:encryption:init`; they encrypt learners' own LLM keys, and losing them makes stored keys unreadable, `docs/basic-design.md` section 7.2). It is passed to the `backend` container only, through `env_file` (the file itself is not mounted); `frontend` and `cli` never get it. Compose also maps the MySQL values into `backend` as `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`; Rails `database.yml` should read those names.
-
-### Tests
-
-@.claude/rules/test/testing.md
-
----
-
-## Architecture
-
-### Overall architecture
-
-@.claude/rules/code/architecture.md
-
-### Frontend
-
-@.claude/rules/code/frontend.md
-
-### Backend
-
-@.claude/rules/code/backend.md
-
----
-
-## LLM Integration
-
-@.claude/rules/code/llm-integration.md
-
----
-
-## Error Handling
-
-@.claude/rules/meta/error.md
+`.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development), `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` and `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT`.
 
 ---
 

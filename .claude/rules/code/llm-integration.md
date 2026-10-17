@@ -1,3 +1,8 @@
+---
+paths:
+  - "backend/**"
+---
+
 # LLM Integration
 
 Rules for code that calls the LLM API. Based on `docs/basic-design.md` sections 6.4 and 7.2.
