@@ -43,7 +43,7 @@ An unfinished main node of a map that the learner can study now: every node with
 _Avoid_: 進める方角, next step
 
 **既知ノード (Known node)**:
-A node in a map that the learner has already started or completed in another map, so this map treats it as understood to some degree.
+A node in a map that the learner has already completed in another map, so this map treats it as understood to some degree. A node only in progress in another map is not a known node.
 _Avoid_: 既習ノード, learned node, 再利用ノード
 
 **ドリルダウン (Drill-down)**:
