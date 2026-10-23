@@ -32,6 +32,7 @@
 | v2.0.0 | 2026/10/12 | 本書を仕様の正とし，Design Doc は理由だけを書く形に役割を分けた（#46）．Design Doc から，テーブル定義（Design Doc 4.1.2 → 5章），処理（4.2 → 6章），API の振る舞い（4.3.1 → 7.1），LLM API（4.3.2 → 7.2），画面の振る舞い（4.4 → 3章），CLI（4.5 → 4章，7.4），Web の認証（4.6 → 7.3），テスト方針（7章 → 8章）を移した．ReqDef 6章の技術スタックを 2.6 に移した．章立てを変え，CLI 設計を4章として独立させた．仕様そのものは変えていない | 池田 琉俊 |
 | v2.1.0 | 2026/10/14 | 3章を「共通仕様（3.1）」と「画面ごとの詳細仕様（3.2）」の構成に改め，画面に見えるものと操作だけを書く形にした．画面の裏の処理は 6.8 フロントエンドの処理に移し，画面と API の対応は 7.1 の表の列にした．S-02 を「マップ作成画面」に改め，廃止した S-01 を詰めて画面IDを S-01〜S-05 に振り直した（旧 S-02〜S-06）．CLI の出力を JSON にし，対話をなくした（2.4，4章，7.4，8章）．2.5 リポジトリ構成を削除し，技術スタック（2.5）に依存ライブラリを加えた．5.1 から並び順の記述を削除した．6.7 生成ジョブを 6.4.6 に統合して 6.4 を小節に分け，6.6 を現在地（6.6.1）とコンパス（6.6.2）に分けて擬似コードを規則の箇条書きにした．これに伴い旧 6.8・6.9 を 6.7・6.8 に繰り上げた．6.2 の擬似コードを箇条書きにし，6.1 を各節への参照だけの短い流れにした | 池田 琉俊 |
 | v2.2.0 | 2026/10/23 | 既知ノードを他のマップで完了したノードだけにした（6.6.2，#53）．`progress_statuses.started_map_id` を削除し（5.2，5.3，5.4，6.6.1，7.1），マップ削除の前の「このマップで学習を始めたノード」の注意をやめた（3.2.2.8，5.6）．7.1 の `deletion_preview` の説明と，8章のコンパス・進捗更新・マップ削除のテストを合わせて直した | 池田 琉俊 |
+| v2.3.0 | 2026/10/23 | 形が決まっていなかった API を決め，食い違いを直した（#43）．7.1 に `POST /api/goal_suggestions`（`attempt` で何回目の入力かを送る），`GET /api/maps/:id/deletion_preview`，`GET /api/nodes/:id/sub_nodes` の形と，成功のステータスコード，`confirmed=true` をクエリで送ること，見つからない値（`404 not_found`）と不正な値（`400 invalid_request`）のエラーを追加し，`GET /api/maps` の `error` を `failed` でなければ `null` とした．元ノードと寄り道の注記をやめ（3.1.3，3.2.2.1），`GET /api/maps` と `GET /api/maps/:id` から `origin` と `detour_start` を削除した．6.2 と 6.8 に `attempt` の数え方を，4.3〜4.5 に `campass goals` の `--attempt` と出力を，7.3 にログインの Cookie の名前を追加 | 池田 琉俊 |
 
 ---
 
@@ -222,7 +223,7 @@ graph TD
   * 上に「＋ 新しいマップ」を置き，S-01 へ移る．
   * その下にマップのタイトルを最後に更新した順に並べ，今開いているマップを強調する．選ぶとそのマップの S-02 へ移る．
   * 生成中のマップにはスピナー，失敗したマップには S-02 と同じ黄色の警告アイコン（3.1.4）を付ける．どちらも文字のバッジは出さず，スクリーンリーダーには「作成中」「作成に失敗」と読ませる．失敗は色や動きだけでなく，アイコンの形でも区別する．
-  * 元ノードや寄り道からの注記，削除のボタン，進捗は出さない．注記は S-02 のマップのタイトルの下に，削除は S-02 の上部のメニューに置く．
+  * 削除のボタンと進捗は出さない．削除は S-02 の上部のメニューに置く．
   * いちばん下に，設定（S-05）への入口（歯車のアイコンと「設定」）を置く．S-05 を開いている間は，入口を強調する．
 * 広い画面（幅 768px 以上）では，サイドバーをマップの左に**並べ**，マップの表示領域をその分だけ狭める．マップの上に重ねない（理由：Design Doc 4.7）．開閉しても，マップの見ている中心を保つ．開いていても，マップの操作（ノードの選択，ドラッグ，拡大縮小，詳細パネル，編集）はすべてふつうに使える．
 * 狭い画面（幅 768px 未満）では，サイドバーをマップの上に**重ねる**．背景は暗くせず，見えている部分のマップは操作できる．マップを選んだときだけ自動で閉じる．
@@ -311,9 +312,7 @@ graph TD
 
 ##### 3.2.2.1 画面レイアウト
 
-画面に置くもの：マップとコンパス，マップのタイトルとその下の注記，上部のメニュー（「このマップを削除」），「← 来たマップへ戻る」，詳細パネル，サイドバー（3.1.3）．配置は今後設計予定．
-
-* 元ノードや寄り道から作ったマップでは，マップのタイトルの下に「Ruby の『オブジェクト指向』から」「Ruby の『Web アプリ開発』からの寄り道」のような注記を付ける．
+画面に置くもの：マップとコンパス，マップのタイトル，上部のメニュー（「このマップを削除」），「← 来たマップへ戻る」，詳細パネル，サイドバー（3.1.3）．配置は今後設計予定．
 
 ##### 3.2.2.2 画面項目定義
 
@@ -550,7 +549,7 @@ CLI は画面を持たないため，各画面に相当する操作をサブコ�
 | :--- | :--- | :--- | :--- |
 | `campass login` / `campass logout` | 認証トークンの取得・破棄．`campass login` は URL とコードを示し，ブラウザの S-03 で許可されるのを待ってトークンを受け取る（7.4） | S-03 | F-014 |
 | `campass maps` | マップ一覧 | サイドバー | F-012 |
-| `campass goals <興味>` | ゴール候補の提案（4.5） | S-01 | F-001，F-002 |
+| `campass goals <興味> [--attempt <回数>]` | ゴール候補の提案（4.5） | S-01 | F-001，F-002 |
 | `campass new` | マップを作って生成を始め，生成されたノードを受け取る（4.5） | S-01 | F-003，F-011 |
 | `campass map <map_id>` | マップ（メインノードと道）とコンパス | S-02 | F-006，F-013 |
 | `campass show <map_id> <node_id>` | ノードの詳細とサブノード（ドリルダウン） | S-02 | F-007，F-015 |
@@ -597,7 +596,7 @@ CLI は画面を持たないため，各画面に相当する操作をサブコ�
 | コマンド | スキーマ |
 | :--- | :--- |
 | `campass maps` | `MapList` |
-| `campass goals` | 未定（#43） |
+| `campass goals` | `GoalSuggestionResponse` |
 | `campass new` | `MapCreated`，続けて生成の様子（4.6） |
 | `campass map` | `MapView`（生成中なら，生成の様子（4.6）の後に出す） |
 | `campass show` | `{"node": NodeDetail, "sub_nodes": SubNodeGraph}` |
@@ -611,7 +610,7 @@ CLI は画面を持たないため，各画面に相当する操作をサブコ�
 
 ### 4.5 マップの作成（`campass goals`，`campass new`）
 
-1. `campass goals "<興味>"` は，ゴール候補の提案（F-002，6.2）の結果を出す．再入力の扱いは 6.2 に従い，バックエンドが判定する．
+1. `campass goals "<興味>" [--attempt <回数>]` は，ゴール候補の提案（F-002，6.2）の結果を出す．`--attempt` は何回目の入力か（`attempt`，7.1）で，省略時は `1` とする．数え方と判定は 6.2 に従う（入力し直したゴールを送るときは `--attempt 2`）．
 2. `campass new --goal "<ゴール>" --difficulty light|standard|deep [--title "<タイトル>"] [--origin-node <node_id> | --detour <detour_id>]` は，`POST /api/maps` でマップを作って生成を始める．
    * `--goal` は `goal_text`，`--title` は `title` になる．`--title` を省いたときは `--goal` と同じにする．
    * ゴール候補を選んだときは，候補のタイトルを `--title` に渡す．
@@ -1032,6 +1031,7 @@ erDiagram
 * `is_concrete` が `true` なら，入力をそのままゴールとする．
 * `false` なら，同じプロンプトでゴール候補を3件（`title`，`description`）作らせ，利用者に示す（S-01，`campass goals`）．利用者は候補から選ぶか，自分でゴールを入力し直す．
 * 入力し直したゴールは，1回だけ判定し直す．2回目以降は判定せず，入力をそのままゴールとする．
+* 何回目の入力かは，クライアントが `attempt` で送る（7.1）．最初の入力を `1` とし，入力し直すたびに1増やす．バックエンドは `attempt` が `1` と `2` のときだけ判定し，`3` 以上なら判定せずに入力をそのままゴールとする（`is_concrete` を `true` として返す）．
 
 ### 6.3 難易度選択によるプロンプト制約（F-003）
 
@@ -1305,6 +1305,11 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.7）から編集�
 * S-03 で `404 invalid_user_code` が返ったら，コードが正しくないか期限切れとして示す．コードの形の正規化はバックエンドが行う．
 * S-04 の `error` が `email_not_verified` なら，確認済みのメールアドレスが必要であることを示す（7.3）．
 
+**ゴール候補の提案（S-01）**
+
+* `POST /api/goal_suggestions` の `attempt`（6.2）は，S-01 で入力を送るたびに数える．最初の入力を `1` とし，候補が示された後に自分でゴールを入力し直して送るたびに1増やす．S-01 を開き直したら `1` に戻す．
+* 判定するかはバックエンドが決める．フロントエンドは返った `is_concrete` と `candidates` をそのまま使う．
+
 **生成の受信（SSE）**
 
 * S-01 から移ってきたときと，`generating` のマップを開いたときに `GET /api/maps/:id/generation` につなぐ．
@@ -1344,7 +1349,7 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.7）から編集�
 
 ### 7.1 クライアント（フロントエンド・CLI）–バックエンドAPI
 
-API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラーの `code` の取り得る値，SSE のイベントの `data`）の正は `api/openapi.yaml`（OpenAPI 3.0.3）とし，本節は各 API の目的，振る舞い，エラーコードの意味と文言の対応を書く．JSON の例は書かず，`api/openapi.yaml` の `operationId` と `components/schemas` の名前で参照する（理由：Design Doc 4.6）．API の形を変えるときは，`api/openapi.yaml` と本節を同じ変更で直す．形がまだ決まっていない箇所（`POST /api/goal_suggestions`，`GET /api/maps/:id/deletion_preview`，`GET /api/nodes/:id/sub_nodes` の形など）は #43 で決める．
+API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラーの `code` の取り得る値，SSE のイベントの `data`）の正は `api/openapi.yaml`（OpenAPI 3.0.3）とし，本節は各 API の目的，振る舞い，エラーコードの意味と文言の対応を書く．JSON の例は書かず，`api/openapi.yaml` の `operationId` と `components/schemas` の名前で参照する（理由：Design Doc 4.6）．API の形を変えるときは，`api/openapi.yaml` と本節を同じ変更で直す．
 
 REST API を基本としつつ，マップ生成のみストリーミング（Server-Sent Events）で提供する．フロントエンドと CLI（4章）は同じ API を利用する．ブラウザは Cookie セッション（7.3），CLI は `Authorization: Bearer <token>` ヘッダー（7.4）で認証する．ログインしていない（どちらでもユーザーを特定できない）リクエストには，ログイン用の API（`POST /api/auth/:provider`，`GET /api/auth/:provider/callback`，`POST /api/auth/cli_login_requests`，`POST /api/auth/cli_login_requests/token`）を除いて `401` を返す．
 
@@ -1353,22 +1358,22 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 | `POST /api/auth/:provider` | `startWebLogin` | Web のログインを始める（F-019，7.3）．`provider` は `google` / `github`．SPA の CSRF トークン付きのフォーム送信で呼び，Google / GitHub のログイン画面へ転送する．`return_to` を受け取る． | S-04 |
 | `GET /api/auth/:provider/callback` | `webLoginCallback` | Google / GitHub からの戻り先（7.3）．ユーザーを探すか作り，ログインの Cookie を付けて `FRONTEND_ORIGIN` + `return_to` へ転送する． | —（Google / GitHub から戻る） |
 | `GET /api/session` | `getSession` | ログイン中のユーザーと CSRF トークンを返す（7.3）．未ログインなら `401`． | 起動時の全画面（`401` なら S-04 へ） |
-| `DELETE /api/session` | `deleteSession` | ログアウト．その端末のセッションだけを消す（7.3）． | ログアウト（Web） |
-| `POST /api/auth/cli_login_requests` | `createCliLoginRequest` | CLI のログインを始める（7.4）．認証なし．CLI のマシン名 `name` を受け取り，`device_code`，`user_code`，`verification_uri`，`expires_in`，`interval` を返す． | `campass login` |
+| `DELETE /api/session` | `deleteSession` | ログアウト．その端末のセッションだけを消し，`204` を返す（7.3）． | ログアウト（Web） |
+| `POST /api/auth/cli_login_requests` | `createCliLoginRequest` | CLI のログインを始める（7.4）．認証なし．CLI のマシン名 `name` を受け取り，`200` で `device_code`，`user_code`，`verification_uri`，`expires_in`，`interval` を返す． | `campass login` |
 | `POST /api/auth/cli_login_requests/token` | `pollCliLoginToken` | CLI がトークンを受け取りに来る（7.4）．認証なし．`device_code` を受け取り，許可されていればトークンを発行して返す．まだなら状態を返す． | `campass login` |
 | `POST /api/auth/cli_login_requests/lookup` | `lookupCliLoginRequest` | S-03 の確認に出す内容（端末名と開始時刻）を返す（3.2.3）．Web のログインが必要．`user_code` を受け取る． | S-03 |
 | `POST /api/auth/cli_login_requests/approve` | `approveCliLoginRequest` | CLI のログインを許可する（S-03）．Web のログインが必要．`user_code` を受け取る． | S-03 |
 | `POST /api/auth/cli_login_requests/deny` | `denyCliLoginRequest` | CLI のログインを拒否する（S-03）．Web のログインが必要．`user_code` を受け取る． | S-03 |
-| `DELETE /api/auth/tokens/current` | `revokeCurrentToken` | リクエストに使ったトークンを失効させる（7.4）． | `campass logout` |
+| `DELETE /api/auth/tokens/current` | `revokeCurrentToken` | リクエストに使ったトークンを失効させ，`204` を返す（7.4）． | `campass logout` |
 | `GET /api/llm_providers` | `listLlmProviders` | 自分の LLM API キーに選べる会社とモデルの候補（ReqDef F-020）． | S-05 |
 | `GET /api/llm_credential` | `getLlmCredential` | 自分の LLM API キーの設定の状態（F-020）．会社，モデル，`api_key_last4`，`verified_at` を返し，未設定なら `null`．キーそのものは返さない． | S-05 |
 | `PUT /api/llm_credential` | `putLlmCredential` | 自分の LLM API キーを確かめてから保存する（F-020，7.2）．`provider`，`model`，`api_key` を受け取る．Web のログイン（Cookie セッション）でだけ受け付ける． | S-05 |
 | `DELETE /api/llm_credential` | `deleteLlmCredential` | 自分の LLM API キーを削除し，サービスのキーに戻す（F-020）．Web のログイン（Cookie セッション）でだけ受け付ける． | S-05 |
-| `GET /api/maps` | `listMaps` | ログインユーザーのマップ一覧を取得（F-012）．元ノードや寄り道の出発点の情報を含める． | `/`・`/maps`・ログイン直後の転送，サイドバー，`campass maps` |
+| `GET /api/maps` | `listMaps` | ログインユーザーのマップ一覧を取得（F-012）． | `/`・`/maps`・ログイン直後の転送，サイドバー，`campass maps` |
 | `POST /api/maps` | `createMap` | マップを作り，同時に生成を開始する（F-011）．ゴールと難易度を受け取り，元ノードから作る場合は `origin_node_id`，寄り道から作る場合は `detour_id` を指定する（F-006，F-017）．マップは `generating` で作られ，生成ジョブ（6.4.6）を起動して `201` を返す．生成の様子は `GET /api/maps/:id/generation` で受け取る． | S-01（Web で呼ぶのは S-01 だけ），`campass new` |
-| `DELETE /api/maps/:id` | `deleteMap` | マップの削除．ノードの扱いは 5.6 に従う．生成中のマップも削除でき，生成ジョブは止まる（6.4.6）． | S-02，`campass delete` |
-| `GET /api/maps/:id/deletion_preview` | `getMapDeletionPreview` | 削除前の確認．削除の影響を返す（5.6）． | S-02，`campass delete` |
-| `POST /api/goal_suggestions` | `createGoalSuggestions` | 入力に対するゴール候補提案（F-002）．マップを作る前に呼ぶため，マップを指定しない． | S-01，`campass goals` |
+| `DELETE /api/maps/:id` | `deleteMap` | マップの削除．ノードの扱いは 5.6 に従う．生成中のマップも削除でき，生成ジョブは止まる（6.4.6）．`204` を返す． | S-02，`campass delete` |
+| `GET /api/maps/:id/deletion_preview` | `getMapDeletionPreview` | 削除前の確認．このマップを削除すると消えるノード（他のどのマップにも，どのノードのサブノードにも残らないノード．5.6）を返す． | S-02，`campass delete` |
+| `POST /api/goal_suggestions` | `createGoalSuggestions` | 入力に対するゴール候補提案（F-002，6.2）．入力と，何回目の入力か（`attempt`）を受け取る．マップを作る前に呼ぶため，マップを指定しない． | S-01，`campass goals` |
 | `GET /api/maps/:id/generation` (SSE) | `streamMapGeneration` | 生成の様子を受け取る（F-011）．保存済みのノードをすべて送った後，新しく保存されたノードを送り，終端イベントで閉じる．何度つなぎ直してもよい．イベント形式は本節の「SSE イベント形式」を参照． | S-02，`campass new`，`campass map` |
 | `GET /api/maps/:id` | `getMap` | マップ画面の表示内容．生成の状態，メインノードと道，作成済みの寄り道の入口，元ノードから作ったマップへのリンク，コンパス情報（6.6）を返す．コンパス情報は `ready` のときだけ返す． | S-02，`campass map` |
 | `GET /api/maps/:mapId/nodes/:nodeId` | `getMapNode` | ノードの詳細．概要，進捗，このマップでの寄り道，そのノードが登場する他のマップ，元ノードとして作ったマップを返す． | S-02 の詳細パネル，`campass show` |
@@ -1405,6 +1410,19 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 
 * `message` は他のエラーと同じく「コード→文言」の対応表から作る．CLI はこのレスポンスをそのまま標準エラー出力に出す（4.4）．
 * `Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定するため（7.3），Cookie セッションがあってもこの `401` になる．
+
+**見つからない値と不正な値**（形は `NotFoundError` / `InvalidRequestError`）
+
+どのエンドポイントでも，当たるときは同じ `code` で返す．`message` は他のエラーと同じく「コード→文言」の対応表から作る．
+
+| HTTP ステータス | `code` | 返す条件 |
+| :--- | :--- | :--- |
+| `404` | `not_found` | パスやリクエストで指定したマップやノードがない，または他ユーザーのもの |
+| `400` | `invalid_request` | リクエストの値が不正（必須の項目がない，候補にない値，`origin_node_id` と `detour_id` の両方がある，`node_id` と `title` の両方がある・どちらもない，など） |
+
+* 不正な値は，項目ごとに `code` を分けない．
+* `422` は，形は正しいが中身の規則に反するもの（`cycle`，`already_placed` など）にだけ使う．
+* `POST /api/maps/:mapId/nodes` と `POST /api/nodes/:id/sub_nodes` は，`node_id` と `title` の両方がある，またはどちらもないリクエストを受け付けない．
 
 **`POST /api/auth/cli_login_requests`**（`createCliLoginRequest`．形は `CliLoginRequestCreate` / `CliLoginRequestCreated`）
 
@@ -1455,15 +1473,18 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 * 保存のときの `api_key_invalid` は「いま入力したキー」を確かめた結果で，呼び出しのときの `user_api_key_invalid`（下の「SSE イベント形式」）は「保存してあるキー」が使えなかった結果である（コードを分ける理由：Design Doc 4.10）．
 * `DELETE /api/llm_credential` は行を消して `204` を返す（未設定でも `204`）．以後の呼び出しはサービスのキーに戻る．生成中のマップは，始まったときのキーで続く（6.4.6）．
 
-**`POST /api/goal_suggestions` のエラー**（`createGoalSuggestions`．形は `UserApiKeyError` / `LlmApiError`）
+**`POST /api/goal_suggestions`**（`createGoalSuggestions`．形は `GoalSuggestionRequest` / `GoalSuggestionResponse` / `UserApiKeyError` / `LlmApiError`）
 
+* `input` は利用者の入力，`attempt` は1から数える何回目の入力かである（数え方は 6.2）．
+* `200` で `is_concrete` と `candidates`（`title`，`description`）を返す．`is_concrete` が `true` なら `candidates` は空の配列とする．
+* `attempt` が `3` 以上なら LLM を呼ばず，`is_concrete` を `true`，`candidates` を空の配列として返す（6.2）．
 * 利用者のキー（7.2）で LLM を呼んで失敗したときは，`422` で `code` に `user_api_key_invalid` / `user_api_key_quota_exceeded` を返す．意味と文言は，本節の「SSE イベント形式」のエラーコードの表と同じ「コード→文言」の対応表から作る．サービスのキーでは呼び直さない．クライアントは S-05 で設定を確かめるよう案内する（3.2.1.7）．
 * それ以外の LLM の呼び出しの失敗は `502` で `code` に `llm_api_error` を返す．
 
 **`GET /api/maps`**（`listMaps`．形は `MapList`）
 
 * `updated_at` の新しい順に返す（同じなら `id` の大きい順）．`updated_at` の意味は 5.5 に従う．
-* `status` が `failed` のマップは `error`（`code`，`message`）を持つ．`message` はエラーコードの対応表（本節の「SSE イベント形式」）から作る．
+* `error` は `failed` のときだけ `code` と `message` を持ち，それ以外は `null` とする（`GET /api/maps/:id` と同じ）．`message` はエラーコードの対応表（本節の「SSE イベント形式」）から作る．
 * このAPIを呼んだときに，ハートビートが切れた `generating` のマップを `failed`（`timed_out`）にしてから返す（6.4.6）．
 
 **`GET /api/maps/:id`**（`getMap`．形は `MapView`）
@@ -1480,12 +1501,22 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 
 * 概要，進捗，このマップでの寄り道（作ったマップがあれば `spawned_map_id`），そのノードが登場する他のマップ，元ノードとして作ったマップを返す．
 
+**`GET /api/maps/:id/deletion_preview`**（`getMapDeletionPreview`．形は `MapDeletionPreview`）
+
+* `deleted_nodes` は，このマップを削除すると消えるノード（他のどのマップの `map_nodes` にも，どのノードの `sub_nodes` にも残らないノード．5.6）の `node_id`，`title`，`progress` である．なければ空の配列とする．
+
+**`GET /api/nodes/:id/sub_nodes`**（`getSubNodes`．形は `SubNodeGraph`）
+
+* `node` は指定したノードの `id`，`title`，`summary`，`sub_nodes` はその直下のサブノード，`paths` はサブノード間の道（`sub_node_paths`）である．
+* `sub_nodes` の各項目は `id`，`title`，`summary`，`progress`，`has_sub_nodes`，`paths` の各項目は `from`，`to` である．`GET /api/maps/:id` の `MapNode` / `MapPath` と名前が同じ項目は，同じ意味とする．
+
 **`PATCH /api/maps/:mapId/nodes/:nodeId/progress`**（`updateNodeProgress`．形は `ProgressUpdate` / `ProgressUpdated`）
 
 * `origin_completion_suggestion` は，この更新でマップがゴールに到達し，マップに元ノードがある場合にだけ返す（それ以外は `null`）．クライアントは元ノードの完了を提案し，完了にするかはユーザーが決める（6.6）．
 
 **ノードの編集（F-018）のレスポンス**（形は `MapView` / `SubNodeGraph` / `MapNotReadyError` / `ConfirmationRequiredError` / `CycleError` / `AlreadyPlacedError`）
 
+* 成功したときは，追加（POST）も含めて `200` を返す．
 * マップに関わる操作（`/api/maps/:mapId/nodes`，`/api/maps/:mapId/paths`）は，成功すると `GET /api/maps/:id` と同じ形のマップ全体（`graph` と `compass`）を返す．
 * ノードに関わる操作（`/api/nodes/:id`，`/api/nodes/:id/sub_nodes`，`/api/nodes/:id/sub_node_paths`）は，成功すると `GET /api/nodes/:id/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．
 * 失敗と確認は次の形で返す．`message` は SSE のエラーと同じく「コード→文言」の対応表から作る．
@@ -1493,10 +1524,11 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
   | HTTP ステータス | `code` | 意味 |
   | :--- | :--- | :--- |
   | `409` | `map_not_ready` | 操作したマップが `ready` でない（6.7） |
-  | `409` | `confirmation_required` | 実行前の確認が必要．`confirmed=true` を付けて送り直すと実行する（6.7） |
+  | `409` | `confirmation_required` | 実行前の確認が必要．クエリに `confirmed=true` を付けて送り直すと実行する（6.7） |
   | `422` | `cycle` | 道・サブノード・サブノード間の道が循環する（6.7） |
   | `422` | `already_placed` | 置こうとしたノードが，すでにこのマップのメインノードである |
-  | `404` | — | マップやノードがない，または他ユーザーのもの |
+  | `404` | `not_found` | マップやノードがない，または他ユーザーのもの |
+  | `400` | `invalid_request` | リクエストの値が不正（本節の「見つからない値と不正な値」） |
 
 **`GET /api/nodes?q=:text&map_id=:mapId`**（`searchNodes`．形は `NodeSuggestions`）
 
@@ -1593,7 +1625,7 @@ SSE は生成ジョブ（6.4.6）から直接ではなく，DB から読んで�
 
 **セッション**
 
-* Cookie には，ランダムな長いセッショントークン（例：`SecureRandom.urlsafe_base64(32)`）だけを入れる．DB の `web_sessions.token_digest` にはその SHA-256 ハッシュを保存し，平文は保存しない（`api_tokens` と同じ）．
+* ログインの Cookie の名前は `campass_session` とする．Cookie には，ランダムな長いセッショントークン（例：`SecureRandom.urlsafe_base64(32)`）だけを入れる．DB の `web_sessions.token_digest` にはその SHA-256 ハッシュを保存し，平文は保存しない（`api_tokens` と同じ）．
 * 有効期限は最後に使ってから30日とする．使うと `last_used_at` と `expires_at` を更新して延ばす（スライド式）．更新は CLI のトークン（7.4）と同じく1日に1回までとし，`last_used_at` が1日以上前のときだけ書き込む．絶対的な上限は設けない．期限切れのセッションは使わず，`401` を返す．期限切れの行は消さない（掃除は Design Doc 6章）．
 * ログアウト（`DELETE /api/session`）は，その端末の `web_sessions` の行を消し，Cookie を消す．同じユーザーの他の端末のセッションと CLI のトークンには触れない．
 * バックエンドは「Cookie セッション または Bearer トークン（CLI，7.4）」でユーザーを特定する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定し，Cookie は見ない．
