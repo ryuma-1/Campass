@@ -1,7 +1,7 @@
 # API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラー）の正．
 # 振る舞いの正は docs/basic_design.md 7.1（理由は docs/design_doc.md 4.6）．API の形を変えるときは，この文書と basic_design 7.1 を同じ変更で直す．
 # examples / example は書かない（正はスキーマだけ）．format は date-time 以外を使わない．
-# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 4.6）．null を許す値は nullable: true，$ref に null や説明を足すときは allOf で包む．
+# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 4.6）．null を許す値は nullable: true（同じ階層に type が要る），$ref に null や説明を足すときは allOf で包む．
 openapi: 3.0.3
 info:
   title: Campass API
@@ -99,8 +99,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
-        2XX:
-          description: ログアウトした．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
+        '204':
+          description: ログアウトした．
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -119,12 +119,14 @@ paths:
             schema:
               $ref: '#/components/schemas/CliLoginRequestCreate'
       responses:
-        2XX:
-          description: ログイン要求を作った．ステータスコードは basic_design 7.1 に書かれていない（#43）．
+        '200':
+          description: ログイン要求を作った．
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CliLoginRequestCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/auth/cli_login_requests/token:
     post:
@@ -146,11 +148,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenIssued'
         '400':
-          description: まだトークンを渡せない（RFC 8628 の状態）．
+          description: まだトークンを渡せない（RFC 8628 の状態），またはリクエストの値が不正（`invalid_request`）．
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CliLoginTokenError'
+                oneOf:
+                  - $ref: '#/components/schemas/CliLoginTokenError'
+                  - $ref: '#/components/schemas/InvalidRequestError'
 
   /api/auth/cli_login_requests/lookup:
     post:
@@ -174,6 +178,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CliLoginRequestLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -199,6 +205,8 @@ paths:
       responses:
         '204':
           description: 許可した．
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -224,6 +232,8 @@ paths:
       responses:
         '204':
           description: 拒否した．
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -239,8 +249,8 @@ paths:
       security:
         - bearerToken: []
       responses:
-        2XX:
-          description: 失効させた．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
+        '204':
+          description: 失効させた．
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -302,6 +312,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LlmCredentialResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -371,10 +383,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MapCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/maps/{id}:
     get:
@@ -408,8 +424,8 @@ paths:
         - $ref: '#/components/parameters/MapId'
         - $ref: '#/components/parameters/CsrfToken'
       responses:
-        2XX:
-          description: 削除した．ステータスコードと本文は basic_design 7.1 に書かれていない（#43）．
+        '204':
+          description: 削除した．
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -489,12 +505,14 @@ paths:
             schema:
               $ref: '#/components/schemas/GoalSuggestionRequest'
       responses:
-        2XX:
-          description: 判定の結果．ステータスコードは basic_design 7.1 に書かれていない（#43）．
+        '200':
+          description: 判定の結果．
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalSuggestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -552,6 +570,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/MapEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -577,6 +597,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/MapEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -613,6 +635,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgressUpdated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -659,8 +683,10 @@ paths:
             schema:
               $ref: '#/components/schemas/SubNodeCreate'
       responses:
-        2XX:
+        '200':
           $ref: '#/components/responses/NodeEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -700,8 +726,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NodeSuggestions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ---------------------------------------------------------------- editing
   /api/maps/{mapId}/nodes:
@@ -723,8 +753,10 @@ paths:
             schema:
               $ref: '#/components/schemas/MainNodeCreate'
       responses:
-        2XX:
+        '200':
           $ref: '#/components/responses/MapEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -755,8 +787,10 @@ paths:
             schema:
               $ref: '#/components/schemas/PathCreate'
       responses:
-        2XX:
+        '200':
           $ref: '#/components/responses/MapEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -783,6 +817,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/MapEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -815,6 +851,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/NodeEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -847,6 +885,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/NodeEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -877,8 +917,10 @@ paths:
             schema:
               $ref: '#/components/schemas/SubNodePathCreate'
       responses:
-        2XX:
+        '200':
           $ref: '#/components/responses/NodeEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -906,6 +948,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/NodeEdited'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -925,7 +969,6 @@ components:
       name: campass_session
       description: |
         ブラウザのログイン（basic_design 7.3）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
-        Cookie の名前は basic_design に書かれていない（#43）．ここの `campass_session` は仮の名前である．
         書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` ヘッダーと，`FRONTEND_ORIGIN` と一致する `Origin` が要る．
     bearerToken:
       type: http
@@ -989,7 +1032,6 @@ components:
       required: false
       description: |
         `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（basic_design 6.7）．
-        basic_design は「`confirmed=true` を付けて」とだけ書き，クエリか本文かを決めていない（#43）．ここではクエリとして書く．
       schema:
         type: boolean
     CsrfToken:
@@ -1007,6 +1049,12 @@ components:
         type: string
 
   responses:
+    BadRequest:
+      description: リクエストの値が不正（必須の項目がない，候補にない値，同時に指定できない項目がある，など）．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InvalidRequestError'
     Unauthorized:
       description: ユーザーを特定できない．
       content:
@@ -1020,7 +1068,11 @@ components:
           schema:
             $ref: '#/components/schemas/InvalidCsrfError'
     NotFound:
-      description: マップやノードがない，または他ユーザーのもの．本文の形は basic_design 7.1 に書かれていない（#43）．
+      description: 指定したマップやノードがない，または他ユーザーのもの．
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NotFoundError'
     InvalidUserCode:
       description: '`user_code` に一致する要求がない，期限切れ，または `pending` でない．'
       content:
@@ -1034,13 +1086,13 @@ components:
           schema:
             $ref: '#/components/schemas/LlmApiError'
     MapEdited:
-      description: 編集した．`GET /api/maps/{id}` と同じ形のマップ全体を返す．POST のステータスコードは basic_design 7.1 に書かれていない（#43）．
+      description: 編集した．`GET /api/maps/{id}` と同じ形のマップ全体を返す．
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/MapView'
     NodeEdited:
-      description: 編集した．`GET /api/nodes/{id}/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．POST のステータスコードは basic_design 7.1 に書かれていない（#43）．
+      description: 編集した．`GET /api/nodes/{id}/sub_nodes` と同じ形で，そのノードの内容とサブノードを返す．
       content:
         application/json:
           schema:
@@ -1118,6 +1170,20 @@ components:
         message:
           type: string
           description: バックエンドの「コード→文言」の対応表から作る．利用者に表示してよい．
+    InvalidRequestError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [invalid_request]
+    NotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              enum: [not_found]
     UnauthorizedError:
       allOf:
         - $ref: '#/components/schemas/Error'
@@ -1367,6 +1433,7 @@ components:
       required: [llm_credential]
       properties:
         llm_credential:
+          type: object
           allOf:
             - $ref: '#/components/schemas/LlmCredential'
           nullable: true
@@ -1374,10 +1441,32 @@ components:
     # ------------------------------------------------ maps
     GoalSuggestionRequest:
       type: object
-      description: リクエストの形は basic_design 7.1 に書かれていない（#43）．
+      required: [input, attempt]
+      properties:
+        input:
+          type: string
+          description: 利用者が入力した興味またはゴール．
+        attempt:
+          type: integer
+          minimum: 1
+          description: 1から数える何回目の入力か．
     GoalSuggestionResponse:
       type: object
-      description: レスポンスの形は basic_design 7.1 に書かれていない（#43）．6.2 は LLM の出力として `is_concrete` と最大3件の `candidates`（`title`，`description`）を挙げている．
+      required: [is_concrete, candidates]
+      properties:
+        is_concrete:
+          type: boolean
+        candidates:
+          type: array
+          description: '`is_concrete` が `true` なら空．'
+          items:
+            type: object
+            required: [title, description]
+            properties:
+              title:
+                type: string
+              description:
+                type: string
     MapCreate:
       type: object
       required: [title, goal_text, difficulty]
@@ -1416,26 +1505,9 @@ components:
           nullable: true
         created_at:
           $ref: '#/components/schemas/Timestamp'
-    MapOrigin:
-      description: 元ノードから作ったマップの元ノード．形は basic_design 7.1 に書かれていない（例は `null` だけ，#43）．
-      type: object
-      nullable: true
-    DetourStart:
-      type: object
-      description: 寄り道から作ったマップの出発点．
-      required: [map_id, map_title, node_id, node_title]
-      properties:
-        map_id:
-          $ref: '#/components/schemas/Id'
-        map_title:
-          type: string
-        node_id:
-          $ref: '#/components/schemas/Id'
-        node_title:
-          type: string
     MapListItem:
       type: object
-      required: [id, title, difficulty, status, origin, detour_start, updated_at]
+      required: [id, title, difficulty, status, error, updated_at]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1446,14 +1518,10 @@ components:
         status:
           $ref: '#/components/schemas/MapStatus'
         error:
+          description: '`failed` のときだけ持ち，それ以外は `null`．'
+          type: object
           allOf:
             - $ref: '#/components/schemas/MapError'
-          description: '`failed` のときだけ持つ．'
-        origin:
-          $ref: '#/components/schemas/MapOrigin'
-        detour_start:
-          allOf:
-            - $ref: '#/components/schemas/DetourStart'
           nullable: true
         updated_at:
           $ref: '#/components/schemas/Timestamp'
@@ -1490,6 +1558,7 @@ components:
           description: このノードを元ノードとして作ったマップ．
         spawned_detour_map:
           description: このノードの寄り道から作ったマップ．
+          type: object
           allOf:
             - $ref: '#/components/schemas/MapRef'
           nullable: true
@@ -1529,7 +1598,7 @@ components:
           type: boolean
     MapView:
       type: object
-      required: [map_id, title, status, error, origin, graph, compass]
+      required: [map_id, title, status, error, graph, compass]
       properties:
         map_id:
           $ref: '#/components/schemas/Id'
@@ -1539,11 +1608,10 @@ components:
           $ref: '#/components/schemas/MapStatus'
         error:
           description: '`failed` のときだけ持ち，それ以外は `null`．'
+          type: object
           allOf:
             - $ref: '#/components/schemas/MapError'
           nullable: true
-        origin:
-          $ref: '#/components/schemas/MapOrigin'
         graph:
           type: object
           required: [nodes, paths]
@@ -1558,12 +1626,27 @@ components:
                 $ref: '#/components/schemas/MapPath'
         compass:
           description: '`ready` のときだけ持ち，それ以外は `null`．'
+          type: object
           allOf:
             - $ref: '#/components/schemas/Compass'
           nullable: true
     MapDeletionPreview:
       type: object
-      description: レスポンスの形は basic_design 7.1 に書かれていない（#43）．7.1 の表は「そのマップで学習中にしたノードと，他のマップに残るノードの数を返す」とだけ書く．
+      required: [deleted_nodes]
+      properties:
+        deleted_nodes:
+          type: array
+          description: このマップを削除すると消えるノード．なければ空．
+          items:
+            type: object
+            required: [node_id, title, progress]
+            properties:
+              node_id:
+                $ref: '#/components/schemas/Id'
+              title:
+                type: string
+              progress:
+                $ref: '#/components/schemas/Progress'
 
     # ------------------------------------------------ SSE のイベントの data
     NodeEvent:
@@ -1590,6 +1673,7 @@ components:
             $ref: '#/components/schemas/Id'
         importance_score:
           description: メインノードのときだけ．サブノードなら `null`．
+          type: number
           allOf:
             - $ref: '#/components/schemas/ImportanceScore'
           nullable: true
@@ -1695,12 +1779,46 @@ components:
           $ref: '#/components/schemas/Compass'
         origin_completion_suggestion:
           description: この更新でゴールに到達し，マップに元ノードがあるときだけ．それ以外は `null`．
+          type: object
           allOf:
             - $ref: '#/components/schemas/NodeRef'
           nullable: true
     SubNodeGraph:
       type: object
-      description: ノードの内容とサブノード群，その間の道．形は basic_design 7.1 に書かれていない（#43）．
+      description: ノードの内容とサブノード群，その間の道．`MapNode` / `MapPath` と名前が同じ項目は同じ意味．
+      required: [node, sub_nodes, paths]
+      properties:
+        node:
+          type: object
+          required: [id, title, summary]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            title:
+              type: string
+            summary:
+              type: string
+        sub_nodes:
+          type: array
+          items:
+            type: object
+            required: [id, title, summary, progress, has_sub_nodes]
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              title:
+                type: string
+              summary:
+                type: string
+              progress:
+                $ref: '#/components/schemas/Progress'
+              has_sub_nodes:
+                type: boolean
+        paths:
+          type: array
+          description: サブノード間の道（`sub_node_paths`）．
+          items:
+            $ref: '#/components/schemas/MapPath'
     NodeSuggestions:
       type: object
       required: [nodes]
