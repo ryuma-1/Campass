@@ -32,7 +32,7 @@
 | v2.0.0 | 2026/10/12 | 本書を仕様の正とし，Design Doc は理由だけを書く形に役割を分けた（#46）．Design Doc から，テーブル定義（Design Doc 4.1.2 → 5章），処理（4.2 → 6章），API の振る舞い（4.3.1 → 7.1），LLM API（4.3.2 → 7.2），画面の振る舞い（4.4 → 3章），CLI（4.5 → 4章，7.4），Web の認証（4.6 → 7.3），テスト方針（7章 → 8章）を移した．ReqDef 6章の技術スタックを 2.6 に移した．章立てを変え，CLI 設計を4章として独立させた．仕様そのものは変えていない | 池田 琉俊 |
 | v2.1.0 | 2026/10/14 | 3章を「共通仕様（3.1）」と「画面ごとの詳細仕様（3.2）」の構成に改め，画面に見えるものと操作だけを書く形にした．画面の裏の処理は 6.8 フロントエンドの処理に移し，画面と API の対応は 7.1 の表の列にした．S-02 を「マップ作成画面」に改め，廃止した S-01 を詰めて画面IDを S-01〜S-05 に振り直した（旧 S-02〜S-06）．CLI の出力を JSON にし，対話をなくした（2.4，4章，7.4，8章）．2.5 リポジトリ構成を削除し，技術スタック（2.5）に依存ライブラリを加えた．5.1 から並び順の記述を削除した．6.7 生成ジョブを 6.4.6 に統合して 6.4 を小節に分け，6.6 を現在地（6.6.1）とコンパス（6.6.2）に分けて擬似コードを規則の箇条書きにした．これに伴い旧 6.8・6.9 を 6.7・6.8 に繰り上げた．6.2 の擬似コードを箇条書きにし，6.1 を各節への参照だけの短い流れにした | 池田 琉俊 |
 | v2.2.0 | 2026/10/23 | 既知ノードを他のマップで完了したノードだけにした（6.6.2，#53）．`progress_statuses.started_map_id` を削除し（5.2，5.3，5.4，6.6.1，7.1），マップ削除の前の「このマップで学習を始めたノード」の注意をやめた（3.2.2.8，5.6）．7.1 の `deletion_preview` の説明と，8章のコンパス・進捗更新・マップ削除のテストを合わせて直した | 池田 琉俊 |
-| v2.3.0 | 2026/10/23 | 形が決まっていなかった API を決め，食い違いを直した（#43）．7.1 に `POST /api/goal_suggestions`（`attempt` で何回目の入力かを送る），`GET /api/maps/:id/deletion_preview`，`GET /api/nodes/:id/sub_nodes` の形と，成功のステータスコード，`confirmed=true` をクエリで送ること，見つからない値（`404 not_found`）と不正な値（`400 invalid_request`）のエラーを追加し，`GET /api/maps` の `error` を `failed` でなければ `null` とした．元ノードと寄り道の注記をやめ（3.1.3，3.2.2.1），`GET /api/maps` と `GET /api/maps/:id` から `origin` と `detour_start` を削除した．4.3〜4.5 に `campass goals` の `--attempt` と出力を，7.3 にログインの Cookie の名前を追加 | 池田 琉俊 |
+| v2.3.0 | 2026/10/23 | 形が決まっていなかった API を決め，食い違いを直した（#43）．7.1 に `POST /api/goal_suggestions`（`attempt` で何回目の入力かを送る），`GET /api/maps/:id/deletion_preview`，`GET /api/nodes/:id/sub_nodes` の形と，成功のステータスコード，`confirmed=true` をクエリで送ること，見つからない値（`404 not_found`）と不正な値（`400 invalid_request`）のエラーを追加し，`GET /api/maps` の `error` を `failed` でなければ `null` とした．元ノードと寄り道の注記をやめ（3.1.3，3.2.2.1），`GET /api/maps` と `GET /api/maps/:id` から `origin` と `detour_start` を削除した．6.2 と 6.8 に `attempt` の数え方を，4.3〜4.5 に `campass goals` の `--attempt` と出力を，7.3 にログインの Cookie の名前を追加 | 池田 琉俊 |
 
 ---
 
@@ -610,7 +610,7 @@ CLI は画面を持たないため，各画面に相当する操作をサブコ�
 
 ### 4.5 マップの作成（`campass goals`，`campass new`）
 
-1. `campass goals "<興味>" [--attempt <回数>]` は，ゴール候補の提案（F-002，6.2）の結果を出す．`--attempt` は何回目の入力か（`attempt`，7.1）で，省略時は `1` とする．入力し直したゴールを送るときは `--attempt 2` を付ける．再入力の扱いは 6.2 に従い，`attempt` からバックエンドが判定する．
+1. `campass goals "<興味>" [--attempt <回数>]` は，ゴール候補の提案（F-002，6.2）の結果を出す．`--attempt` は何回目の入力か（`attempt`，7.1）で，省略時は `1` とする．数え方と判定は 6.2 に従う（入力し直したゴールを送るときは `--attempt 2`）．
 2. `campass new --goal "<ゴール>" --difficulty light|standard|deep [--title "<タイトル>"] [--origin-node <node_id> | --detour <detour_id>]` は，`POST /api/maps` でマップを作って生成を始める．
    * `--goal` は `goal_text`，`--title` は `title` になる．`--title` を省いたときは `--goal` と同じにする．
    * ゴール候補を選んだときは，候補のタイトルを `--title` に渡す．
@@ -1031,6 +1031,7 @@ erDiagram
 * `is_concrete` が `true` なら，入力をそのままゴールとする．
 * `false` なら，同じプロンプトでゴール候補を3件（`title`，`description`）作らせ，利用者に示す（S-01，`campass goals`）．利用者は候補から選ぶか，自分でゴールを入力し直す．
 * 入力し直したゴールは，1回だけ判定し直す．2回目以降は判定せず，入力をそのままゴールとする．
+* 何回目の入力かは，クライアントが `attempt` で送る（7.1）．最初の入力を `1` とし，入力し直すたびに1増やす．バックエンドは `attempt` が `1` と `2` のときだけ判定し，`3` 以上なら判定せずに入力をそのままゴールとする（`is_concrete` を `true` として返す）．
 
 ### 6.3 難易度選択によるプロンプト制約（F-003）
 
@@ -1304,6 +1305,11 @@ LLM が作ったマップを，ユーザーが Web と CLI（4.7）から編集�
 * S-03 で `404 invalid_user_code` が返ったら，コードが正しくないか期限切れとして示す．コードの形の正規化はバックエンドが行う．
 * S-04 の `error` が `email_not_verified` なら，確認済みのメールアドレスが必要であることを示す（7.3）．
 
+**ゴール候補の提案（S-01）**
+
+* `POST /api/goal_suggestions` の `attempt`（6.2）は，S-01 で入力を送るたびに数える．最初の入力を `1` とし，候補が示された後に自分でゴールを入力し直して送るたびに1増やす．S-01 を開き直したら `1` に戻す．
+* 判定するかはバックエンドが決める．フロントエンドは返った `is_concrete` と `candidates` をそのまま使う．
+
 **生成の受信（SSE）**
 
 * S-01 から移ってきたときと，`generating` のマップを開いたときに `GET /api/maps/:id/generation` につなぐ．
@@ -1469,9 +1475,9 @@ REST API を基本としつつ，マップ生成のみストリーミング（Se
 
 **`POST /api/goal_suggestions`**（`createGoalSuggestions`．形は `GoalSuggestionRequest` / `GoalSuggestionResponse` / `UserApiKeyError` / `LlmApiError`）
 
-* `input` は利用者の入力，`attempt` は1から数える何回目の入力かである．最初の入力は `1`，入力し直したゴール（6.2）は `2` とする．
-* `attempt` が `2` 以下なら LLM に判定させ（6.2），`200` で `is_concrete` と `candidates`（`title`，`description`）を返す．`is_concrete` が `true` なら `candidates` は空の配列とする．
-* `attempt` が `3` 以上なら LLM を呼ばず，`is_concrete` を `true`，`candidates` を空の配列として返す（入力し直したゴールを1回だけ判定し直す規則（6.2）を，バックエンドが `attempt` で判定する）．
+* `input` は利用者の入力，`attempt` は1から数える何回目の入力かである（数え方は 6.2）．
+* `200` で `is_concrete` と `candidates`（`title`，`description`）を返す．`is_concrete` が `true` なら `candidates` は空の配列とする．
+* `attempt` が `3` 以上なら LLM を呼ばず，`is_concrete` を `true`，`candidates` を空の配列として返す（6.2）．
 * 利用者のキー（7.2）で LLM を呼んで失敗したときは，`422` で `code` に `user_api_key_invalid` / `user_api_key_quota_exceeded` を返す．意味と文言は，本節の「SSE イベント形式」のエラーコードの表と同じ「コード→文言」の対応表から作る．サービスのキーでは呼び直さない．クライアントは S-05 で設定を確かめるよう案内する（3.2.1.7）．
 * それ以外の LLM の呼び出しの失敗は `502` で `code` に `llm_api_error` を返す．
 
