@@ -127,6 +127,9 @@ module ToolPrototype
   # ツール呼び出しを 1 つずつ検証して反映する．DB への保存の代わり．
   class MapBuilder
     SAME_TURN_ERROR = "同じ応答の中にエラーになった呼び出しがある．エラーを直してから finish を呼ぶ"
+    # ディープでは "n12,summary:" のように引数の境目が崩れた ref が来たため，形を確かめる．
+    REF_FORMAT = /\A[A-Za-z0-9_]+\z/
+    REF_FORMAT_ERROR = 'ref は英数字と _ だけで書く（例: n1, s1）'
 
     attr_reader :nodes, :main_refs, :paths, :goal_ref, :log
 
@@ -209,6 +212,7 @@ module ToolPrototype
     # メインノードを足す．create_node と reuse_node の共通部分．
     def add_main(a, fields)
       return "ref #{a['ref']} はすでに使われている" if blank?(a['ref']) || @nodes.key?(a['ref'])
+      return REF_FORMAT_ERROR unless a['ref'].match?(REF_FORMAT)
 
       score = a['importance_score']
       return "importance_score #{score.inspect} は 0〜1 の数にする" unless score.is_a?(Numeric) && score.between?(0, 1)
@@ -225,6 +229,7 @@ module ToolPrototype
       parent = @nodes[a['parent_ref']]
       return "parent_ref #{a['parent_ref']} はまだ作られていない" unless parent
       return "ref #{a['ref']} はすでに使われている" if blank?(a['ref']) || @nodes.key?(a['ref'])
+      return REF_FORMAT_ERROR unless a['ref'].match?(REF_FORMAT)
 
       level = parent['level'] + 1
       return "階層 #{level} は最大 #{@params['max_depth']} 階層を超える" if level > @params['max_depth']

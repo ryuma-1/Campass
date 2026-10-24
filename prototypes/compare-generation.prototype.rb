@@ -124,7 +124,7 @@ module ComparePrototype
           {
             'structured' => -> { structured(dry_run ? MapPrototype::FakeStream.new : MapPrototype::GeminiStream.new(api_key: api_key, model: model), goal, params) },
             'tools' => -> { tools(dry_run ? ToolPrototype::FakePartStream.new : ToolPrototype::GeminiPartStream.new(api_key: api_key, model: model), goal, params) }
-          }.each do |approach, run|
+          }.select { |k, _| ENV.fetch('APPROACHES', 'structured,tools').split(',').include?(k) }.each do |approach, run|
             begin
               row = run.call
             rescue StandardError => e
