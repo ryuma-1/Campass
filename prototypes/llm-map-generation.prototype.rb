@@ -374,6 +374,28 @@ module MapPrototype
     end
   end
 
+  # Gemini API が 200 以外を返した．429（1 分あたりの上限）を見分けて待つために status を持つ．
+  class ApiError < StandardError
+    attr_reader :status
+
+    # status と応答の本文を受け取る．
+    def initialize(status, body)
+      @status = status
+      super("Gemini API error #{status}: #{body}")
+    end
+  end
+
+  # 出力が JSON として読めなかった．失敗した試行の費用も数えるため，usageMetadata を持つ．
+  class ParseFailed < StandardError
+    attr_reader :meta
+
+    # 元の例外と，ストリームの最後の meta を受け取る．
+    def initialize(error, meta)
+      @meta = meta
+      super("JSON::ParserError: #{error.message[0, 200]}")
+    end
+  end
+
   # Gemini の streamGenerateContent を SSE で呼ぶ．
   # google-genai 0.1.1 はストリーミングも systemInstruction も扱えないため，Faraday で直接呼ぶ．
   class GeminiStream
@@ -420,7 +442,7 @@ module MapPrototype
           end
         end
       end
-      raise "Gemini API error #{response.status}: #{error_body}" unless response.status == 200
+      raise ApiError.new(response.status, error_body) unless response.status == 200
 
       meta
     end
@@ -479,17 +501,29 @@ module MapPrototype
     first_token_at = nil
     elapsed = -> { (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(2) }
 
+    parse_error = nil
     meta = client.stream(body) do |text|
       first_token_at ||= elapsed.call
-      splitter.feed(text) do |node|
-        nodes << node
-        timeline << { 'ref' => node['ref'], 'at' => elapsed.call }
-        print_node(node, timeline.last['at']) unless quiet
+      next if parse_error
+
+      begin
+        splitter.feed(text) do |node|
+          nodes << node
+          timeline << { 'ref' => node['ref'], 'at' => elapsed.call }
+          print_node(node, timeline.last['at']) unless quiet
+        end
+      rescue JSON::ParserError => e
+        # ストリームは最後まで読み，usageMetadata を受け取ってから失敗にする．
+        parse_error = e
       end
     end
 
     # ノード単位の切り出しと，全体を一度に読んだ結果が一致するかを確かめる．
-    full = splitter.full_document
+    begin
+      full = parse_error ? raise(parse_error) : splitter.full_document
+    rescue JSON::ParserError => e
+      raise ParseFailed.new(e, meta)
+    end
     split_matches = full['main_nodes'] == nodes
     validation = Validator.run(nodes, EXISTING_NODES, params)
     {
@@ -538,9 +572,9 @@ module MapPrototype
       puts "\n--- 試行 #{i + 1} ---" unless quiet
       begin
         result = attempt(client, body, params, quiet: quiet)
-      rescue JSON::ParserError => e
-        puts "JSON パース失敗: #{e.message[0, 200]}" unless quiet
-        attempts << { 'error' => "JSON::ParserError: #{e.message[0, 200]}" }
+      rescue ParseFailed => e
+        puts "JSON パース失敗: #{e.message}" unless quiet
+        attempts << { 'error' => e.message, 'usage' => e.meta['usage'] }
         next
       end
       v = result['validation']
