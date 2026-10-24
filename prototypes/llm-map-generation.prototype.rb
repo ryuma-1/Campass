@@ -471,7 +471,7 @@ module MapPrototype
   end
 
   # 1 回分の生成を行い，ノード到着の記録と検証結果を返す．
-  def self.attempt(client, body, params)
+  def self.attempt(client, body, params, quiet: false)
     splitter = NodeSplitter.new
     nodes = []
     timeline = []
@@ -484,7 +484,7 @@ module MapPrototype
       splitter.feed(text) do |node|
         nodes << node
         timeline << { 'ref' => node['ref'], 'at' => elapsed.call }
-        print_node(node, timeline.last['at'])
+        print_node(node, timeline.last['at']) unless quiet
       end
     end
 
@@ -518,6 +518,52 @@ module MapPrototype
                 node['importance_score'].to_f, detour)
   end
 
+  # 最初のリクエストの本文．
+  def self.request_body(goal, params)
+    {
+      'systemInstruction' => { 'parts' => [{ 'text' => system_prompt(params) }] },
+      'contents' => [{ 'role' => 'user', 'parts' => [{ 'text' => user_content(goal, EXISTING_NODES) }] }],
+      'generationConfig' => {
+        'responseMimeType' => 'application/json',
+        'responseJsonSchema' => response_schema(params)
+      }
+    }
+  end
+
+  # 再生成（最大 2 回）を含めて生成し，試行ごとの記録と最後の結果を返す．
+  def self.run(client, body, params, quiet: false)
+    attempts = []
+    result = nil
+    3.times do |i|
+      puts "\n--- 試行 #{i + 1} ---" unless quiet
+      begin
+        result = attempt(client, body, params, quiet: quiet)
+      rescue JSON::ParserError => e
+        puts "JSON パース失敗: #{e.message[0, 200]}" unless quiet
+        attempts << { 'error' => "JSON::ParserError: #{e.message[0, 200]}" }
+        next
+      end
+      v = result['validation']
+      attempts << { 'errors' => v['errors'], 'warnings' => v['warnings'], 'total_seconds' => result['total_seconds'], 'first_node_at' => result['timeline'].dig(0, 'at'), 'usage' => result['meta']['usage'] }
+      puts "最初のトークン: #{result['first_token_at']}s / 全体: #{result['total_seconds']}s / 終了理由: #{result['meta']['finish_reason']}" unless quiet
+      puts "ノード単位の切り出しと全体の JSON が一致: #{result['split_matches_full_document']}" unless quiet
+      puts "統計: #{v['stats']}" unless quiet
+      puts "形: #{v['shape']}" unless quiet
+      v['errors'].each { |m| puts "  エラー: #{m}" } unless quiet
+      v['warnings'].each { |m| puts "  警告: #{m}" } unless quiet
+      break if v['errors'].empty?
+
+      puts '検証エラーのため，前回の出力とエラーを伝えて再生成する' unless quiet
+      # 同じプロンプトで再生成すると同じ誤りを繰り返したため，前回の出力とエラーを会話の続きとして渡す．
+      # エラー文はこちらが作った文で，ユーザーの自由入力は含まない．
+      body = body.merge('contents' => body['contents'].first(1) + [
+        { 'role' => 'model', 'parts' => [{ 'text' => JSON.generate('main_nodes' => result['main_nodes']) }] },
+        { 'role' => 'user', 'parts' => [{ 'text' => "前回の出力には次の問題がありました．問題を直したマップ全体を，同じ形式で出力し直してください．\n#{v['errors'].map { |m| "- #{m}" }.join("\n")}" }] }
+      ])
+    end
+    [attempts, result]
+  end
+
   # コマンドライン引数を読み，再生成（最大 2 回）を含めて実行し，結果を JSON に保存する．
   def self.main(argv)
     dry_run = argv.delete('--dry-run')
@@ -535,49 +581,14 @@ module MapPrototype
         GeminiStream.new(api_key: api_key, model: model)
       end
 
-    body = {
-      'systemInstruction' => { 'parts' => [{ 'text' => system_prompt(params) }] },
-      'contents' => [{ 'role' => 'user', 'parts' => [{ 'text' => user_content(goal, EXISTING_NODES) }] }],
-      'generationConfig' => {
-        'responseMimeType' => 'application/json',
-        'responseJsonSchema' => response_schema(params)
-      }
-    }
+    body = request_body(goal, params)
 
     puts "ゴール: #{goal} / 難易度: #{params['label']} (max_depth=#{params['max_depth']}, メインノード #{params['node_count_target']})"
     puts "モデル: #{dry_run ? 'dry-run（固定出力）' : model}"
     # TODO(opt-out): Gemini API にはリクエスト単位の学習オプトアウト項目がない．課金ティアの規約で担保するかを決める．
     puts '注意: 学習オプトアウトのパラメータは付けていない（Gemini API に該当項目がないため）'
 
-    attempts = []
-    result = nil
-    3.times do |i|
-      puts "\n--- 試行 #{i + 1} ---"
-      begin
-        result = attempt(client, body, params)
-      rescue JSON::ParserError => e
-        puts "JSON パース失敗: #{e.message[0, 200]}"
-        attempts << { 'error' => "JSON::ParserError: #{e.message[0, 200]}" }
-        next
-      end
-      v = result['validation']
-      attempts << { 'errors' => v['errors'], 'warnings' => v['warnings'], 'total_seconds' => result['total_seconds'] }
-      puts "最初のトークン: #{result['first_token_at']}s / 全体: #{result['total_seconds']}s / 終了理由: #{result['meta']['finish_reason']}"
-      puts "ノード単位の切り出しと全体の JSON が一致: #{result['split_matches_full_document']}"
-      puts "統計: #{v['stats']}"
-      puts "形: #{v['shape']}"
-      v['errors'].each { |m| puts "  エラー: #{m}" }
-      v['warnings'].each { |m| puts "  警告: #{m}" }
-      break if v['errors'].empty?
-
-      puts '検証エラーのため，前回の出力とエラーを伝えて再生成する'
-      # 同じプロンプトで再生成すると同じ誤りを繰り返したため，前回の出力とエラーを会話の続きとして渡す．
-      # エラー文はこちらが作った文で，ユーザーの自由入力は含まない．
-      body = body.merge('contents' => body['contents'].first(1) + [
-        { 'role' => 'model', 'parts' => [{ 'text' => JSON.generate('main_nodes' => result['main_nodes']) }] },
-        { 'role' => 'user', 'parts' => [{ 'text' => "前回の出力には次の問題がありました．問題を直したマップ全体を，同じ形式で出力し直してください．\n#{v['errors'].map { |m| "- #{m}" }.join("\n")}" }] }
-      ])
-    end
+    attempts, result = run(client, body, params)
 
     out_dir = File.join(__dir__, 'output')
     Dir.mkdir(out_dir) unless Dir.exist?(out_dir)
