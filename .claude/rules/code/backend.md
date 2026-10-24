@@ -107,8 +107,7 @@ Shapes (parameters, request and response JSON, status codes, error codes, SSE ev
 - **Node reuse (F-015, basic-design 6.4)**: the LLM reuses the user's existing nodes by ID instead of duplicating them (see `llm-integration.md` for the prompt and save-merge rules). For a map made from an origin node, its new main nodes also become sub nodes of the origin node. Never reuse another user's nodes.
 - **Compass (F-013, basic-design 6.6)**: over the map's main nodes, recomputed on every progress update, never stored.
   - Current position: derived from `map_progress_events` of that map (ADR 0005). For each placement (`map_node_id` not NULL) take the latest event; drop `reset`; the newest remaining `started` / `completed` is the current position. Events are only added by progress updates made from that map, and are never deleted when a node is removed.
-  - Known node: completed in another map. Progress is shared, so any `completed` node counts, wherever it was completed. An `in_progress` node is never a known node.
-  - Candidates: not completed, not known, and every incoming `map_paths` source is completed or known. Sort by `importance_score` desc, then `id`. Return all of them.
+  - Candidates: not completed, and every incoming `map_paths` source is completed. Progress is shared, so a node completed in another map counts as completed. Sort by `importance_score` desc, then `id`. Return all of them.
   - Goal reached: at least one main node and every main node completed (an empty map is never goal reached); return `is_goal_reached: true` and empty `candidates`. Never auto-complete the origin node; return a suggestion instead.
   - Sub node progress is recorded but ignored by the compass.
 - **Drill-down (F-007)**: sub nodes come from `sub_nodes` and are the same in every map.

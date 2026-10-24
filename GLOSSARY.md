@@ -7,7 +7,7 @@ Campass helps self-learners reach a goal by working backward from it: an LLM lay
 ### Map contents
 
 **ノード (Node)**:
-One learning item. A node belongs to the learner and can appear in more than one map.
+One learning item. A node belongs to the learner and can appear in more than one map. Its progress is shared by every map it appears in.
 _Avoid_: 地点, ステップ, step
 
 **道 (Path)**:
@@ -39,7 +39,7 @@ The node the learner is at in a given map: the node most recently started or com
 The element on the map screen that points from the current position to every compass candidate. It guides; the learner may start any node.
 
 **コンパス候補 (Compass candidate)**:
-An unfinished main node of a map that the learner can study now: every node with a path into it is completed or a known node. A known node is not a candidate itself.
+An unfinished main node of a map that the learner can study now: every node with a path into it in this map is completed.
 _Avoid_: 進める方角, next step
 
 **既知ノード (Known node)**:
