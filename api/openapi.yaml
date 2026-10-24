@@ -1,14 +1,14 @@
 # API の形（パス，パラメータ，リクエストとレスポンスの JSON，ステータスコード，エラー）の正．
-# 振る舞いの正は docs/basic_design.md 7.1（理由は docs/design_doc.md 4.6）．API の形を変えるときは，この文書と basic_design 7.1 を同じ変更で直す．
+# 振る舞いの正は docs/basic-design.md 7.1（理由は docs/design-doc.md 4.6）．API の形を変えるときは，この文書と基本設計書 7.1 を同じ変更で直す．
 # examples / example は書かない（正はスキーマだけ）．format は date-time 以外を使わない．
-# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．design_doc 4.6）．null を許す値は nullable: true（同じ階層に type が要る），$ref に null や説明を足すときは allOf で包む．
+# OpenAPI 3.0.3 で書く（committee が 3.1 を読めないため．Design Doc 4.6）．null を許す値は nullable: true（同じ階層に type が要る），$ref に null や説明を足すときは allOf で包む．
 openapi: 3.0.3
 info:
   title: Campass API
   version: 0.1.0
   description: |
-    Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いは docs/basic_design.md 7.1 を参照する．
-    ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（basic_design 7.3）．
+    Campass のクライアント（フロントエンド・CLI）とバックエンドの API．振る舞いは docs/basic-design.md 7.1 を参照する．
+    ブラウザは Cookie セッション（cookieSession），CLI は Bearer トークン（bearerToken）で認証する．`Authorization` ヘッダーがあるリクエストは Bearer トークンだけで判定する（基本設計書 7.3）．
     Cookie セッションの書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` が要り，`Origin` が `FRONTEND_ORIGIN` と一致しなければならない．合わなければ `403 invalid_csrf`．
     SSE（`GET /api/maps/{id}/generation`）は OpenAPI 3.0 では本文を文字列としてしか書けないため，各イベントの `data` の形を `components/schemas` に置き，説明文から参照する．使うツール（Prism，committee，openapi-typescript，oapi-codegen）が対応していると確かめられたら OpenAPI 3.2 に上げ，`itemSchema` で書いてよい．
 
@@ -968,12 +968,12 @@ components:
       in: cookie
       name: campass_session
       description: |
-        ブラウザのログイン（basic_design 7.3）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
+        ブラウザのログイン（基本設計書 7.3）．Cookie にはランダムなセッショントークンだけを入れ，DB には SHA-256 だけを保存する．30日のスライド式．
         書き込み（POST / PATCH / DELETE）には `X-CSRF-Token` ヘッダーと，`FRONTEND_ORIGIN` と一致する `Origin` が要る．
     bearerToken:
       type: http
       scheme: bearer
-      description: CLI のトークン（basic_design 7.4）．30日のスライド式．期限切れは `401 token_expired`，一致する行がなければ `401 invalid_token`．
+      description: CLI のトークン（基本設計書 7.4）．30日のスライド式．期限切れは `401 token_expired`，一致する行がなければ `401 invalid_token`．
 
   parameters:
     Provider:
@@ -1031,7 +1031,7 @@ components:
       in: query
       required: false
       description: |
-        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（basic_design 6.7）．
+        `409 confirmation_required` の後，利用者が同意したときだけ `true` を付けて同じリクエストを送り直す（基本設計書 6.7）．
       schema:
         type: boolean
     CsrfToken:
@@ -1142,7 +1142,7 @@ components:
     GenerationErrorCode:
       type: string
       enum: [parse_failed, invalid_map, llm_api_error, user_api_key_invalid, user_api_key_quota_exceeded, internal_error, timed_out]
-      description: '`maps.generation_error_code` と同じ値．意味と `retryable` は basic_design 7.1 の表に従う．'
+      description: '`maps.generation_error_code` と同じ値．意味と `retryable` は基本設計書 7.1 の表に従う．'
     NodeRef:
       type: object
       required: [node_id, title]
