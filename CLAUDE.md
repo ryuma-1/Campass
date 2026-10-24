@@ -24,6 +24,15 @@ docker compose up -d --build                     # start backend + db
 docker compose exec backend bundle install       # install gems
 docker compose exec backend ruby gemini_comu.rb  # manual Gemini API check
 docker compose run --rm cli go test ./...        # run the CLI tests
+docker compose exec backend bin/rails test       # run the backend tests
+```
+
+On a new environment, grant `MYSQL_USER` the rights on the test database once (Rails creates the database itself). The heredoc runs in the `db` container, so the `MYSQL_*` variables come from the container, not from the host:
+
+```bash
+docker compose exec -T db sh <<'EOF'
+mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}_test\`.* TO '$MYSQL_USER'@'%'"
+EOF
 ```
 
 `.env` (gitignored, at the repo root) must define `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` (`gemini` / `gemini-3.1-flash-lite` for now; the backend also falls back to these when unset), `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `FRONTEND_ORIGIN` (`http://localhost:5173` in development), `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` and `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT`.
