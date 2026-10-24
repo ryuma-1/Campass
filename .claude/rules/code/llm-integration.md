@@ -15,14 +15,14 @@ Rules for code that calls the LLM API. Based on `docs/basic-design.md` sections 
 
 ## Structured output
 
-- Map generation must use JSON Schema structured output (or tool calling) so the response format is enforced. Do not parse free-form text.
+- Map generation must use JSON Schema structured output so the response format is enforced. Do not parse free-form text. #26 compared it with tool calling and chose structured output for now; tool calling may be added later if it turns out to be needed (prototype: branch `prototype/llm-tool-calling`, never merged).
 - Each main node has `ref`, `existing_node_id` (reuse) or `title` + `summary` (new), `from` (incoming paths), `importance_score` (0–1, used to highlight compass candidates), nested `sub_nodes`, and `detour` (or `null`). Full schema: `docs/basic-design.md` section 6.4.2.
 - The prompt includes the user's existing nodes (IDs, titles, sub node IDs) so the LLM reuses them. Send only the current user's nodes.
 - If parsing fails, retry at most 2 times in the backend.
 
 ## Map output rules (basic-design 6.3, 6.4)
 
-From the prototype (branch `prototype/llm-map-generation`, never merged). These hold for both structured output and the tool-calling approach under discussion in #26.
+From the prototype (branch `prototype/llm-map-generation`, never merged). These also hold if tool calling is added later (#26).
 
 - `from` lists only prerequisites the learner cannot understand the node without. Nodes that can be learned in parallel stay parallel; do not chain them.
 - For validation at generation time only, the last main node in the output counts as the goal node. A main node that cannot reach it by paths is a validation error; the prompt forbids it too. No order or goal node is stored (goal reached still means every main node is completed).
