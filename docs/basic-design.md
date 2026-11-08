@@ -136,7 +136,7 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | フロントエンド | React（SPA） | 今後設計予定（ルーター，状態管理，グラフの描画） | `openapi-typescript`（型の生成．8章） |
 | CLI | Go | `github.com/spf13/cobra`（と，cobra が使う `spf13/pflag`・`inconshreveable/mousetrap`）．ほかは標準ライブラリ（4.1） | `oapi-codegen`（型の生成．4.1） |
-| バックエンド | Ruby on Rails 7.1（API モード） | `rails`，`mysql2`，`faraday`（LLM の呼び出し．7.2），`dotenv`，`omniauth`・`omniauth-google-oauth2`・`omniauth-github`・`omniauth-rails_csrf_protection`（ログイン．7.3），`rack-cors`（7.3）．`google-genai` は Gemfile に残すが使わない（7.2） | `committee`（API の形の検証．8章），Minitest（Rails 標準） |
+| バックエンド | Ruby on Rails 8.1（API モード） | `rails`，`mysql2`，`faraday`（LLM の呼び出し．7.2），`dotenv`，`omniauth`・`omniauth-google-oauth2`・`omniauth-github`・`omniauth-rails_csrf_protection`（ログイン．7.3），`rack-cors`（7.3）．`google-genai` は Gemfile に残すが使わない（7.2） | `committee`（API の形の検証．8章），Minitest（Rails 標準） |
 | データベース | MySQL 8.0 | — | — |
 | 外部LLM API | Gemini（最初の実装．7.2） | — | — |
 | テスト環境 | — | — | Prism（Docker Compose のテスト用のサービス．8章） |

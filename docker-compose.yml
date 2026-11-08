@@ -1,5 +1,5 @@
 services:
-  # ① バックエンド（Ruby 4.0.5 + Rails API．backend/Dockerfile でビルド）
+  # ① バックエンド（Ruby 4.0.9 + Rails API．backend/Dockerfile でビルド）
   backend:
     build: ./backend
     volumes:

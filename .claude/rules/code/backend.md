@@ -5,7 +5,7 @@ paths:
 
 # Backend Architecture
 
-Ruby on Rails 7.1 in API mode. Design from `docs/basic-design.md` sections 2.3, 6 and 7. Not implemented yet (no Rails app has been generated).
+Ruby on Rails 8.1 in API mode. Design from `docs/basic-design.md` sections 2.3, 6 and 7. Not implemented yet (no Rails app has been generated).
 
 ## Layers
 

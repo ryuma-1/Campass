@@ -24,7 +24,7 @@
 | **クライアント** | CLI | ターミナルから Web と同じようにマップの作成・確認，進捗の更新，編集を行う． |
 | **アカウント** | ログイン・自分の API キー | Google / GitHub でログイン．自分の LLM API キーを設定して使うこともできる． |
 
-技術スタックは，React（SPA），Ruby on Rails 7.1（API モード，Ruby 4.0.5），Go（CLI），MySQL 8.0，Gemini（最初の LLM）で，開発環境は Docker Compose で動かします．依存ライブラリを含む詳細は [基本設計書 2.5](docs/basic-design.md) を参照してください．
+技術スタックは，React（SPA），Ruby on Rails 8.1（API モード，Ruby 4.0.9），Go（CLI），MySQL 8.0，Gemini（最初の LLM）で，開発環境は Docker Compose で動かします．依存ライブラリを含む詳細は [基本設計書 2.5](docs/basic-design.md) を参照してください．
 
 > **開発状況:** 設計段階です．バックエンド・フロントエンド・CLI はまだ実装されていません．
 
