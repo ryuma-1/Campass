@@ -51,7 +51,10 @@ sequenceDiagram
     FE->>BE: POST /api/goal_suggestions
     BE->>LLM: is the goal specific enough?
     LLM-->>BE: 3 goal candidates if vague (F-002)
-    U->>FE: choose goal + difficulty (F-003)
+    U->>FE: choose goal
+    FE->>BE: POST /api/start_suggestions
+    BE->>LLM: starting-node candidates, one recommended (F-021)
+    U->>FE: choose starting node (default: recommended) + difficulty (F-003)
     FE->>BE: POST /api/maps (create map + start generation job)
     FE->>BE: GET /api/maps/:id/generation (SSE, reconnectable)
     BE->>DB: load the user's existing nodes
@@ -64,7 +67,9 @@ sequenceDiagram
     BE->>DB: mark map ready
     BE-->>FE: SSE done
     FE->>BE: GET /api/maps/:id
-    BE-->>FE: main nodes + paths + compass
+    BE-->>FE: main nodes + paths + current position (starting node)
+    U->>FE: start and complete the node at the current position
+    BE-->>FE: compass (only once that node is completed)
     U->>FE: pick a compass candidate, update progress
     FE->>BE: PATCH /api/maps/:mapId/nodes/:nodeId/progress
     BE-->>FE: updated compass
