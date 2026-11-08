@@ -32,11 +32,15 @@ _Avoid_: ノートブック, notebook, ノート, note, 章, chapter, 学習マ�
 
 ### Navigation
 
+**出発点 (Starting node)**:
+The main node of a map where the learner begins learning, chosen when the map is made. Nodes the starting node needs come before it, and the learner can go back to them. The learner may later remove it from the map, leaving the map without one.
+_Avoid_: スタート地点, start point, 開始ノード, 起点
+
 **現在地 (Current position)**:
-The node the learner is at in a given map: the node most recently started or completed in that map, otherwise the start point (no node). Each map has its own current position.
+The node the learner is at in a given map: the node most recently started or completed in that map, otherwise the starting node. With neither, the map has no current position. Each map has its own current position.
 
 **コンパス (Compass)**:
-The element on the map screen that points from the current position to every compass candidate. It guides; the learner may start any node.
+The element on the map screen that, once the node at the current position is completed, points from it to every compass candidate. It guides; the learner may start any node.
 
 **コンパス候補 (Compass candidate)**:
 An unfinished main node of a map that the learner can study now: every node with a path into it in this map is completed.
@@ -55,9 +59,9 @@ Expanding a main node to show its sub nodes.
 A node that a map was made from because the node was too large to learn as one node. It stays a normal node in every map it appears in, and has at most one such map. Reaching that map's goal only suggests completing the origin node; the learner decides.
 _Avoid_: 親ノード, parent node, マップ化, サブマップ, 展開
 
-**寄り道の出発点 (Detour start)**:
-The main node a detour map was made from. The map is reached from it on the map screen, but reaching the detour map's goal does not change the start's progress.
-_Avoid_: 元ノード, origin node
+**寄り道の分かれ目 (Detour branch point)**:
+The main node a detour map was made from. The map is reached from it on the map screen, but reaching the detour map's goal does not change the branch point's progress.
+_Avoid_: 寄り道の出発点, detour start, 元ノード, origin node
 
 **マップ間ノード (Shared node)**:
 A node that appears in two or more maps of the same learner. It is one node, so its progress is the same in every map it appears in.
