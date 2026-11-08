@@ -44,7 +44,7 @@ graph LR
     A --> B[Buffer until one node's JSON is complete]
     B --> C{Valid?}
     C -->|yes| D[Save node or reuse existing,<br/>map_nodes / paths / sub_nodes / detour]
-    C -->|no| R[Retry request, max 2] --> A
+    C -->|no| R[Before any save: regenerate<br/>after a save: ask for the rest<br/>max 2 in total] --> A
     D --> A
     A -->|stream ends| G[Mark map ready]
     D -.->|read from DB| F[SSE: one node event per saved node]
@@ -52,7 +52,8 @@ graph LR
 
 The pipeline runs in a background job (ActiveJob `:async`) started by `POST /api/maps`, not in the SSE request, so it continues when the client disconnects (`docs/basic-design.md` section 6.4.6, ADR 0004):
 
-- Save one node per transaction. Lock the `maps` row first (`SELECT … FOR UPDATE`); if the map is gone, close the LLM stream, log, and stop quietly; if it is no longer `generating`, stop without saving. Update `maps.generation_heartbeat_at` after each save.
+- If `maps.start_text` is NULL, first ask for starting-node suggestions and save the recommended title (F-021).
+- Save one node per transaction. When the node has `is_start: true`, set `maps.start_map_node_id` to its placement in the same transaction. Lock the `maps` row first (`SELECT … FOR UPDATE`); if the map is gone, close the LLM stream, log, and stop quietly; if it is no longer `generating`, stop without saving. Update `maps.generation_heartbeat_at` after each save.
 - On an exception, set `status = failed` and `generation_error_code`. Log the details; never store the exception message.
 - Pass only the map to the job, never the key as an argument (ActiveJob serializes and logs job arguments); see `llm-integration.md` for which key is used and when it is read.
 - A `generating` map whose heartbeat is older than the limit (5 minutes to start with) is set to `failed` / `timed_out` by the SSE loop and by map-reading APIs.
@@ -66,11 +67,12 @@ Shapes (parameters, request and response JSON, status codes, error codes, SSE ev
 
 | Endpoint | Purpose |
 | :--- | :--- |
-| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `GET` sorts by `updated_at` desc, then `id` desc. `POST` takes the goal, difficulty, and `origin_node_id` or `detour_id` (F-017, F-006), creates the map as `generating` and starts the generation job (F-011). |
+| `GET /api/maps` / `POST /api/maps` | List / create maps (F-012). `GET` sorts by `updated_at` desc, then `id` desc. `POST` takes the goal, the optional `start_text` (F-021; left out, the job uses the recommendation), difficulty, and `origin_node_id` or `detour_id` (F-017, F-006), creates the map as `generating` and starts the generation job (F-011). |
 | `DELETE /api/maps/:id` / `GET /api/maps/:id/deletion_preview` | Delete a map (also while `generating`; locks the `maps` row first) / preview what deletion affects. |
 | `POST /api/goal_suggestions` | Goal candidates for vague input (F-002). Called before the map exists. |
+| `POST /api/start_suggestions` | Starting-node candidates for a goal (F-021): three, exactly one `recommended`, taking the user's completed nodes into account. With `input`, judge it like a goal (`is_concrete`, `attempt`); without, always return candidates. |
 | `GET /api/maps/:id/generation` (SSE) | Watch generation (F-011): all saved nodes as `node` events, then new ones, then `done`, `error` or `deleted`. Reconnectable; no `Last-Event-ID`. |
-| `GET /api/maps/:id` | `status` and `error`, main nodes, paths, detour entrances, origin links, and `compass` (only when `ready`). |
+| `GET /api/maps/:id` | `status` and `error`, main nodes, paths, `start_node_id`, detour entrances, origin links, and `compass` (only when `ready`). |
 | `GET /api/maps/:mapId/nodes/:nodeId` | Node detail: summary, progress, this map's detour, other maps it appears in. |
 | `GET /api/nodes/:id/sub_nodes` | Drill-down (F-007): sub nodes and the paths among them (shared, no map). |
 | `PATCH /api/maps/:mapId/nodes/:nodeId/progress` | Update progress (F-010); appends a `map_progress_events` row for that map; returns `compass` and `origin_completion_suggestion`. |
@@ -106,15 +108,16 @@ Shapes (parameters, request and response JSON, status codes, error codes, SSE ev
 
 - **Node reuse (F-015, basic-design 6.4)**: the LLM reuses the user's existing nodes by ID instead of duplicating them (see `llm-integration.md` for the prompt and save-merge rules). For a map made from an origin node, its new main nodes also become sub nodes of the origin node. Never reuse another user's nodes.
 - **Compass (F-013, basic-design 6.6)**: over the map's main nodes, recomputed on every progress update, never stored.
-  - Current position: derived from `map_progress_events` of that map (ADR 0005). For each placement (`map_node_id` not NULL) take the latest event; drop `reset`; the newest remaining `started` / `completed` is the current position. Events are only added by progress updates made from that map, and are never deleted when a node is removed.
-  - Candidates: not completed, and every incoming `map_paths` source is completed. Progress is shared, so a node completed in another map counts as completed. Sort by `importance_score` desc, then `id`. Return all of them.
+  - Current position: derived from `map_progress_events` of that map (ADR 0005). For each placement (`map_node_id` not NULL) take the latest event; drop `reset`; the newest remaining `started` / `completed` is the current position. With none, the starting node (`maps.start_map_node_id`) is the current position, without adding an event or changing its progress; with no starting node either, there is no current position. Events are only added by progress updates made from that map, and are never deleted when a node is removed.
+  - When: return candidates only while the node at the current position is completed (ADR 0009); otherwise (not started, in progress, no current position) return an empty list.
+  - Candidates: not completed, and every incoming `map_paths` source is completed. Progress is shared, so a node completed in another map counts as completed. Return all of them, ordered by group, then `importance_score` desc, then `id`: (1) candidates with a path in this map leading to a completed main node (skipped prerequisites), (2) candidates with a path from the current position's node, (3) the rest. A candidate in two groups goes in the earlier one.
   - Goal reached: at least one main node and every main node completed (an empty map is never goal reached); return `is_goal_reached: true` and empty `candidates`. Never auto-complete the origin node; return a suggestion instead.
   - Sub node progress is recorded but ignored by the compass.
 - **Drill-down (F-007)**: sub nodes come from `sub_nodes` and are the same in every map.
 - **Difficulty (F-003)**: ライト / スタンダード / ディープ map to `max_depth`, `node_count_target` (a range, validated) and a sub node count guide (basic-design 6.3).
 - **`maps.updated_at` (basic-design 5.5)**: touch it on every side effect made through that map, even when the `maps` row itself does not change: generation (each node save, `status` changes including `timed_out`), progress updates from that map, and edits from that map (map edits and shared edits with that `map_id`). Never on reads. When shared data (`nodes`, `sub_nodes`, `sub_node_paths`, `progress_statuses`) changes through another map (shared edits, progress updates, sub nodes added by reuse in generation, an origin node's sub nodes changed by its map, nodes deleted with another map), never touch the other maps that contain those nodes: a map the learner is not working in must not become the latest. Do not propagate touches from shared tables to `maps` (no `touch: true` across them); touch only the acting map explicitly. The map list and the redirect to the latest map use it.
 - **Map deletion**: cascade `map_nodes`, `map_paths`, `detours`, `map_progress_events`; delete a node only when no map and no node references it.
-- **Editing (F-018, basic-design 6.7)**: only from a `ready` map (`409 map_not_ready`); lock the `maps` row first. Reject edits that make `map_paths`, `sub_node_paths` or `sub_nodes` cyclic with `422 cycle` and the cycle; never fix them silently. Removing a main node deletes its paths and detour (no rewiring), sets its events' `map_node_id` to NULL, and deletes nodes left unreferenced by the map-deletion rule. Edits that reach other maps or delete nodes with progress return `409 confirmation_required` until resent with `confirmed=true`. Importance high / mid / low is stored as 0.9 / 0.5 / 0.1. In a map made from an origin node, placing or removing a main node also changes the origin node's sub nodes.
+- **Editing (F-018, basic-design 6.7)**: only from a `ready` map (`409 map_not_ready`); lock the `maps` row first. Reject edits that make `map_paths`, `sub_node_paths` or `sub_nodes` cyclic with `422 cycle` and the cycle; never fix them silently. Removing a main node deletes its paths and detour (no rewiring), sets its events' `map_node_id` to NULL (and `maps.start_map_node_id` if it was the starting node; there is no operation to change the starting node), and deletes nodes left unreferenced by the map-deletion rule. Edits that reach other maps or delete nodes with progress return `409 confirmation_required` until resent with `confirmed=true`. Importance high / mid / low is stored as 0.9 / 0.5 / 0.1. In a map made from an origin node, placing or removing a main node also changes the origin node's sub nodes.
 
 ## Environment
 

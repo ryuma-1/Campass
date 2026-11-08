@@ -18,7 +18,7 @@ tags:
   - name: llm_credential
     description: 自分の LLM API キー（F-020）
   - name: maps
-    description: マップ（F-011，F-012，F-013）
+    description: マップ（F-011，F-012，F-013，F-021）
   - name: nodes
     description: ノードとドリルダウン（F-007，F-010）
   - name: editing
@@ -511,6 +511,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalSuggestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 利用者のキーで LLM を呼んで失敗した．サービスのキーでは呼び直さない．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiKeyError'
+        '502':
+          $ref: '#/components/responses/LlmApiError'
+
+  /api/start_suggestions:
+    post:
+      operationId: createStartSuggestions
+      tags: [maps]
+      summary: ゴールに対する出発点の候補の提案（F-021）
+      security:
+        - cookieSession: []
+        - bearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSuggestionRequest'
+      responses:
+        '200':
+          description: 判定の結果と候補．
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartSuggestionResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1467,6 +1505,40 @@ components:
                 type: string
               description:
                 type: string
+    StartSuggestionRequest:
+      type: object
+      required: [goal]
+      properties:
+        goal:
+          type: string
+          description: 決めたゴール．
+        input:
+          type: string
+          description: 利用者が入力した出発点．省くと判定せずに候補を返す．
+        attempt:
+          type: integer
+          minimum: 1
+          description: '`input` を送るときの，1から数える何回目の入力か．`input` がなければ見ない．'
+    StartSuggestionResponse:
+      type: object
+      required: [is_concrete, candidates]
+      properties:
+        is_concrete:
+          type: boolean
+          description: '`input` がないときは `false`．'
+        candidates:
+          type: array
+          description: '`is_concrete` が `true` なら空．空でなければ3件で，ちょうど1件の `recommended` が `true`．'
+          items:
+            type: object
+            required: [title, description, recommended]
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              recommended:
+                type: boolean
     MapCreate:
       type: object
       required: [title, goal_text, difficulty]
@@ -1476,6 +1548,9 @@ components:
           description: 選んだゴール候補のタイトル，または自由入力の文．
         goal_text:
           type: string
+        start_text:
+          type: string
+          description: 出発点（F-021）．選んだ出発点の候補のタイトル，または具体的と判定された入力．省くと，生成ジョブがおすすめの候補を出発点にする．
         difficulty:
           $ref: '#/components/schemas/Difficulty'
         origin_node_id:
@@ -1488,7 +1563,7 @@ components:
           description: 寄り道から作るとき（F-006）．
     MapCreated:
       type: object
-      required: [id, title, goal_text, difficulty, status, origin_node_id, created_at]
+      required: [id, title, goal_text, start_text, difficulty, status, origin_node_id, created_at]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1496,6 +1571,10 @@ components:
           type: string
         goal_text:
           type: string
+        start_text:
+          type: string
+          nullable: true
+          description: '`start_text` を省いて作ったときは，生成ジョブがおすすめの候補を決めるまで `null`．'
         difficulty:
           $ref: '#/components/schemas/Difficulty'
         status:
@@ -1582,10 +1661,10 @@ components:
         current_node_id:
           type: integer
           nullable: true
-          description: 現在地．`null` はスタート地点．
+          description: 現在地．そのマップに開始・完了の記録がなければ出発点．`null` は現在地なし．
         candidates:
           type: array
-          description: '`importance_score` の高い順（同じなら `id` 順）．ゴール到達なら空．'
+          description: '現在地のノードが完了しているときだけ持ち，それ以外は空．並びは基本設計書 6.6.2（組の順，組の中は `importance_score` の高い順，同じなら `id` 順）．ゴール到達なら空．'
           items:
             type: object
             required: [node_id, importance_score]
@@ -1598,7 +1677,7 @@ components:
           type: boolean
     MapView:
       type: object
-      required: [map_id, title, status, error, graph, compass]
+      required: [map_id, title, status, error, start_node_id, graph, compass]
       properties:
         map_id:
           $ref: '#/components/schemas/Id'
@@ -1606,6 +1685,10 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/MapStatus'
+        start_node_id:
+          type: integer
+          nullable: true
+          description: 出発点のノード．出発点のノードを保存する前と，出発点をマップから外した後は `null`．
         error:
           description: '`failed` のときだけ持ち，それ以外は `null`．'
           type: object
@@ -1652,7 +1735,7 @@ components:
     NodeEvent:
       type: object
       description: '`event: node` の `data`．完成した1ノード．ID はすべて DB 保存後の ID．'
-      required: [id, title, summary, is_main, parent_node_id, from, importance_score, reused, progress, detour]
+      required: [id, title, summary, is_main, is_start, parent_node_id, from, importance_score, reused, progress, detour]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1662,6 +1745,9 @@ components:
           type: string
         is_main:
           type: boolean
+        is_start:
+          type: boolean
+          description: このマップの出発点のメインノードなら `true`．サブノードなら `false`．
         parent_node_id:
           type: integer
           nullable: true
