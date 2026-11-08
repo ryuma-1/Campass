@@ -1,4 +1,4 @@
-FROM ruby:4.0.5-slim
+FROM ruby:4.0.9-slim
 
 # Rails、MySQL、各種Gem（psych, mimemagic, nokogiri等）のビルド・動作に
 # 必要なシステムパッケージを「まとめて」インストールします
